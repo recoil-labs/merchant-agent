@@ -552,3 +552,26 @@ async fn test_mode_a_repeated_reference_never_pays_twice() {
 
 	println!("status: {:?}", rail.status(&reference).await.unwrap());
 }
+
+#[tokio::test]
+async fn a_duplicate_reference_refusal_stays_unknown_while_the_transfer_cant_be_seen() {
+	// Paystack says the reference is taken but can't show the transfer yet
+	// (it is still being created). That is not "no money moved": it must
+	// not become a rejection a person could re-pay under a new key.
+	let (server, rail) = mock().await;
+	Mock::given(method("GET"))
+		.and(path(format!("/transfer/verify/{REF}")))
+		.respond_with(refused(404, "Transfer not found"))
+		.mount(&server)
+		.await;
+	recipient_ok(&server).await;
+	Mock::given(method("POST"))
+		.and(path("/transfer"))
+		.respond_with(refused(
+			400,
+			"Please provide a unique reference. Reference already exists on a transfer",
+		))
+		.mount(&server)
+		.await;
+	assert_eq!(send(&rail, REF).await.unwrap(), SendOutcome::Unknown);
+}

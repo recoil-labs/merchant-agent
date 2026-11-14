@@ -29,13 +29,26 @@ Nothing until you upgrade. When the new version starts:
    `merchant-agent doctor`.
 5. Resume if you paused.
 
-Verify a release image's signature before using it:
+Verify a release image's signature before using it, then deploy the exact
+image you verified, by its digest:
 
 ```bash
-cosign verify ghcr.io/recoil-labs/merchant-agent:<version> \
-  --certificate-identity-regexp 'https://github.com/recoil-labs/merchant-agent/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+# 1. The digest the version tag points at now.
+digest=$(docker buildx imagetools inspect ghcr.io/recoil-labs/merchant-agent:<version> \
+  --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+# 2. Signed by this repository's release workflow, for exactly that tag, on
+#    a tag push. Anything else (another workflow, a branch, a pull request)
+#    fails.
+cosign verify "ghcr.io/recoil-labs/merchant-agent@$digest" \
+  --certificate-identity "https://github.com/recoil-labs/merchant-agent/.github/workflows/ci.yml@refs/tags/v<version>" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-github-workflow-trigger push
 ```
+
+Then use `ghcr.io/recoil-labs/merchant-agent@$digest` (not the tag) as
+`MERCHANT_AGENT_IMAGE`, or as `digest:` in `k8s/kustomization.yaml`, so what
+runs is what you verified.
 
 ### Going back
 

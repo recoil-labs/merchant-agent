@@ -20,6 +20,7 @@
 //!   agent is refused rather than guessed at.
 
 use std::fs::{File, OpenOptions};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -332,16 +333,38 @@ fn parse_minor(s: &str) -> StoreResult<Minor> {
 	Minor::parse(s).map_err(|_| StoreError::Corrupt(format!("amount {s}")))
 }
 
+/// Create the data directory readable only by the agent's user (0700), and
+/// tighten an existing one this user owns. It holds the ledger, the console
+/// users' password hashes and the lock file: another local account must
+/// not be able to read them, or hold the lock and keep the agent from
+/// starting. The container image already makes it 0700; this covers the
+/// binary run directly on a host.
+pub fn private_dir(dir: &Path) -> std::io::Result<()> {
+	use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+	std::fs::DirBuilder::new()
+		.recursive(true)
+		.mode(0o700)
+		.create(dir)?;
+	let mode = std::fs::metadata(dir)?.permissions().mode();
+	if mode & 0o077 != 0 {
+		// Fails (and is left alone) when another user owns it, as a
+		// mounted volume's root may be.
+		let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+	}
+	Ok(())
+}
+
 impl Store {
 	/// Open (creating if needed) the store in `data_dir`, taking the OS file
 	/// lock. A second process on this directory gets
 	/// [`StoreError::AnotherInstance`] at once.
 	pub fn open(data_dir: &Path, holder: &str) -> StoreResult<Self> {
-		std::fs::create_dir_all(data_dir).map_err(|e| StoreError::Io(e.to_string()))?;
+		private_dir(data_dir).map_err(|e| StoreError::Io(e.to_string()))?;
 		let lock = OpenOptions::new()
 			.create(true)
 			.truncate(false)
 			.write(true)
+			.mode(0o600)
 			.open(data_dir.join(LOCK_FILE))
 			.map_err(|e| StoreError::Io(e.to_string()))?;
 		rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive)
@@ -361,7 +384,7 @@ impl Store {
 	}
 
 	pub fn open_shared(data_dir: &Path, holder: &str) -> StoreResult<Self> {
-		std::fs::create_dir_all(data_dir).map_err(|e| StoreError::Io(e.to_string()))?;
+		private_dir(data_dir).map_err(|e| StoreError::Io(e.to_string()))?;
 		Self::open_db(&data_dir.join(DB_FILE), holder, None)
 	}
 
@@ -949,7 +972,17 @@ impl Store {
 		self.check_lease(&tx, now)?;
 		let was = self::paused(&tx)?;
 		tx.execute(
-			"UPDATE control SET paused = ?1, paused_by = ?2, paused_auto = ?3, last_book = COALESCE(?4, last_book)
+			// Pausing while already paused keeps who paused and whether it was
+			// automatic: a manual pause must not turn an automatic one (which
+			// only an approver may lift) into one an operator can resume. It
+			// may still save a real book (the CLI saves it in a second write),
+			// but never an empty one over the book saved when payouts paused.
+			"UPDATE control SET
+			   paused = ?1,
+			   paused_by = CASE WHEN paused = 1 AND ?1 = 1 THEN paused_by ELSE ?2 END,
+			   paused_auto = CASE WHEN paused = 1 AND ?1 = 1 THEN paused_auto ELSE ?3 END,
+			   last_book = CASE WHEN paused = 1 AND ?1 = 1 AND (?4 IS NULL OR ?4 = '[]')
+			                    THEN last_book ELSE COALESCE(?4, last_book) END
 			 WHERE id = 1",
 			params![paused, by, auto, last_book],
 		)?;
@@ -1001,7 +1034,14 @@ impl Store {
 			let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 			let was = self::paused(&tx)?;
 			tx.execute(
-				"UPDATE control SET paused = ?1, paused_by = ?2, paused_auto = ?3, last_book = COALESCE(?4, last_book)
+				// As in set_paused: a pause over a pause keeps who paused and
+				// whether it was automatic, and never saves an empty book.
+				"UPDATE control SET
+				   paused = ?1,
+				   paused_by = CASE WHEN paused = 1 AND ?1 = 1 THEN paused_by ELSE ?2 END,
+				   paused_auto = CASE WHEN paused = 1 AND ?1 = 1 THEN paused_auto ELSE ?3 END,
+				   last_book = CASE WHEN paused = 1 AND ?1 = 1 AND (?4 IS NULL OR ?4 = '[]')
+				                    THEN last_book ELSE COALESCE(?4, last_book) END
 				 WHERE id = 1",
 				params![paused, by, auto, last_book],
 			)?;
@@ -1103,6 +1143,105 @@ impl Store {
 		}
 		self.mirror();
 		Ok(())
+	}
+
+	/// Count one failed sign-in, atomically. Concurrent attempts each count,
+	/// and a lock already in force is never cleared by a failure. Returns
+	/// when the account is locked until, if it is (now or already).
+	pub fn record_login_failure(
+		&self,
+		username: &str,
+		max_failures: u32,
+		lockout: chrono::Duration,
+		now: DateTime<Utc>,
+	) -> StoreResult<Option<DateTime<Utc>>> {
+		let locked = {
+			let mut conn = self.conn();
+			let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+			let row: Option<(u32, Option<String>)> = tx
+				.query_row(
+					"SELECT failed_attempts, locked_until FROM users WHERE username = ?1",
+					[username],
+					|r| Ok((r.get(0)?, r.get(1)?)),
+				)
+				.optional()?;
+			let Some((failed, locked_until)) = row else {
+				return Ok(None);
+			};
+			let locked_until = locked_until.as_deref().map(parse_ts).transpose()?;
+			if let Some(until) = locked_until.filter(|u| *u > now) {
+				tx.commit()?;
+				return Ok(Some(until));
+			}
+			let failures = failed.saturating_add(1);
+			let locked = if failures >= max_failures {
+				let until = now + lockout;
+				tx.execute(
+					"UPDATE users SET failed_attempts = 0, locked_until = ?2 WHERE username = ?1",
+					params![username, ts(until)],
+				)?;
+				audit::append(
+					&tx,
+					username,
+					"console_locked",
+					None,
+					&format!("until {}", ts(until)),
+					now,
+				)?;
+				Some(until)
+			} else {
+				tx.execute(
+					"UPDATE users SET failed_attempts = ?2, locked_until = NULL WHERE username = ?1",
+					params![username, failures],
+				)?;
+				None
+			};
+			tx.commit()?;
+			locked
+		};
+		self.mirror();
+		Ok(locked)
+	}
+
+	/// Record a successful sign-in with TOTP step `step`, atomically: only
+	/// if the step is later than the last one used and the account is not
+	/// locked. `false` means the code was already used (or the account
+	/// locked) by a concurrent sign-in, so this one must fail.
+	pub fn record_login_success(
+		&self,
+		username: &str,
+		step: u64,
+		now: DateTime<Utc>,
+	) -> StoreResult<bool> {
+		let ok = {
+			let mut conn = self.conn();
+			let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+			let row: Option<(i64, Option<String>)> = tx
+				.query_row(
+					"SELECT last_totp_step, locked_until FROM users WHERE username = ?1",
+					[username],
+					|r| Ok((r.get(0)?, r.get(1)?)),
+				)
+				.optional()?;
+			let Some((last, locked_until)) = row else {
+				return Ok(false);
+			};
+			let locked_until = locked_until.as_deref().map(parse_ts).transpose()?;
+			let fresh = u64::try_from(last).map_or(true, |last| step > last);
+			let unlocked = locked_until.is_none_or(|u| u <= now);
+			let ok = fresh && unlocked;
+			if ok {
+				tx.execute(
+					"UPDATE users SET failed_attempts = 0, locked_until = NULL, last_totp_step = ?2 WHERE username = ?1",
+					params![username, step as i64],
+				)?;
+				audit::append(&tx, username, "console_signin", None, "", now)?;
+			}
+			tx.commit()?;
+			ok
+		};
+		self.mirror();
+		Ok(ok)
 	}
 
 	pub fn set_user_disabled(&self, username: &str, disabled: bool, by: &str) -> StoreResult<bool> {
@@ -1792,4 +1931,23 @@ pub fn inspect(data_dir: &Path) -> StoreResult<Inspection> {
 		schema: Some(schema as usize),
 		lease,
 	})
+}
+
+#[cfg(test)]
+mod private_dir_tests {
+	use std::os::unix::fs::PermissionsExt;
+
+	#[test]
+	fn the_data_directory_is_private_to_the_agent() {
+		let base = tempfile::tempdir().unwrap();
+		let dir = base.path().join("data");
+		super::private_dir(&dir).unwrap();
+		let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+		assert_eq!(mode, 0o700);
+		// An existing one this user owns is tightened.
+		std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+		super::private_dir(&dir).unwrap();
+		let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+		assert_eq!(mode, 0o700);
+	}
 }

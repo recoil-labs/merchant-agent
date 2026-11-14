@@ -772,3 +772,32 @@ proptest! {
 		}
 	}
 }
+
+#[test]
+fn a_dispute_before_the_bank_confirmed_keeps_checking_the_bank() {
+	// No "Paid" evidence, and the bank is still asked, until it confirms.
+	let t = apply(
+		&S::Reported {
+			bank_confirmed: false,
+		},
+		&Ev::Platform {
+			state: TradeState::Disputed,
+			reported_by_us: true,
+		},
+		IDEMPOTENT,
+	)
+	.unwrap();
+	assert_eq!(
+		t.next,
+		S::Reported {
+			bank_confirmed: false
+		}
+	);
+	assert!(!t.effects.contains(&Effect::AddDisputeEvidence));
+	assert_eq!(
+		step(&S::Reported {
+			bank_confirmed: false
+		}),
+		Io::QueryStatus
+	);
+}

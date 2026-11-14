@@ -126,6 +126,9 @@ server:
   console_bind: "127.0.0.1:8740"
   health_bind: "127.0.0.1:8741"
   bind_public: false
+  # The console answers only on localhost. If you reach it through a TLS
+  # proxy under its own name, list that name here.
+  # console_hostnames: ["agent.example.com"]
 
 storage:
   # The agent's database and audit log. Back this directory up.

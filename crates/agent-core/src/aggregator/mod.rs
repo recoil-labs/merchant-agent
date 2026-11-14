@@ -144,13 +144,20 @@ fn judge(trade: &Trade, reference: &str) -> Judgement {
 	}
 }
 
+/// Whether an id from the aggregator is one the agent will handle: 1 to
+/// 128 ASCII letters, digits, `-` or `_`. Anything else could change a URL
+/// it is put into (an outbound path, a console form action) or a terminal
+/// it is printed to, so trades and quotes with such ids are ignored.
+pub fn valid_id(s: &str) -> bool {
+	(1..=128).contains(&s.len())
+		&& s.bytes()
+			.all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// A path segment from the aggregator or config, checked before it goes
 /// into a URL.
 fn segment(s: &str) -> Result<&str, AggregatorError> {
-	let ok = (1..=128).contains(&s.len())
-		&& s.bytes()
-			.all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-	if ok {
+	if valid_id(s) {
 		Ok(s)
 	} else {
 		Err(AggregatorError::InvalidInput(

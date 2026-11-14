@@ -59,6 +59,10 @@ enum Command {
 		/// Listen on every interface (for a container) instead of 127.0.0.1.
 		#[arg(long)]
 		bind_all: bool,
+		/// For Kubernetes: health on every interface, console on 127.0.0.1
+		/// only (reach it with kubectl port-forward).
+		#[arg(long, conflicts_with = "bind_all")]
+		public_health: bool,
 		/// Read the secrets from files in this directory (api-key,
 		/// payee-key, payee-tag-pepper) instead of environment variables.
 		#[arg(long)]
@@ -217,6 +221,7 @@ fn main() -> ExitCode {
 			aggregator_url,
 			data_dir,
 			bind_all,
+			public_health,
 			secrets_dir,
 			stdout,
 		} => cmd_init(
@@ -229,6 +234,7 @@ fn main() -> ExitCode {
 				aggregator_url,
 				data_dir,
 				bind_all,
+				public_health,
 				secrets_dir,
 				stdout,
 			},
@@ -285,6 +291,7 @@ struct InitFlags {
 	aggregator_url: String,
 	data_dir: PathBuf,
 	bind_all: bool,
+	public_health: bool,
 	secrets_dir: Option<PathBuf>,
 	stdout: bool,
 }
@@ -298,6 +305,7 @@ fn cmd_init(path: &Path, flags: InitFlags) -> ExitCode {
 		aggregator_url,
 		data_dir,
 		bind_all,
+		public_health,
 		secrets_dir,
 		stdout,
 	} = flags;
@@ -316,6 +324,7 @@ fn cmd_init(path: &Path, flags: InitFlags) -> ExitCode {
 			aggregator_url,
 			data_dir,
 			bind_all,
+			public_health,
 			secrets_dir: secrets_dir.clone(),
 		}
 	} else {
@@ -354,6 +363,7 @@ fn cmd_init(path: &Path, flags: InitFlags) -> ExitCode {
 				Some(&data_dir.display().to_string()),
 			)),
 			bind_all,
+			public_health,
 			secrets_dir: secrets_dir.clone(),
 		}
 	};
@@ -392,7 +402,7 @@ fn cmd_init(path: &Path, flags: InitFlags) -> ExitCode {
 	print!("{}", init::next_steps(&path.display().to_string()));
 	// Not fatal: a production data directory is often made by the deploy,
 	// as root, and `doctor` checks it either way.
-	if let Err(e) = std::fs::create_dir_all(&answers.data_dir) {
+	if let Err(e) = merchant_agent_core::store::private_dir(&answers.data_dir) {
 		println!(
 			"\nNote: could not create the data directory {} ({}). Create it, owned by the \
 			 agent's user, before running the agent.",

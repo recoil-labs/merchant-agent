@@ -201,6 +201,8 @@ pub enum ChainError {
 struct Endpoint {
 	label: String,
 	url: String,
+	/// The URL as the HTTP client normalised it: what its errors print.
+	parsed: String,
 	provider: RootProvider,
 }
 
@@ -208,18 +210,54 @@ impl Endpoint {
 	/// An RPC error, with the URL (which may carry an API key) replaced by
 	/// the endpoint's position.
 	fn err(&self, e: impl std::fmt::Display) -> ChainError {
-		let mut why = e.to_string();
-		for form in [
-			self.url.clone(),
-			format!("{}/", self.url.trim_end_matches('/')),
-		] {
-			why = why.replace(&form, &self.label);
-		}
 		ChainError::Rpc {
 			rpc: self.label.clone(),
-			why,
+			why: scrub_url(&e.to_string(), &[&self.url, &self.parsed], &self.label),
 		}
 	}
+}
+
+/// `why` with every spelling of the endpoint's URL replaced by `label`: the
+/// configured text, the client's normalised form (lower-case host, `/`
+/// before a query, ...), each with or without a trailing slash, and
+/// whatever an HTTP error puts in its "for url (...)" suffix.
+fn scrub_url(why: &str, urls: &[&str], label: &str) -> String {
+	let mut why = why.to_string();
+	for url in urls {
+		let url = url.trim();
+		if url.is_empty() {
+			continue;
+		}
+		for form in [
+			url.to_string(),
+			format!("{}/", url.trim_end_matches('/')),
+			url.trim_end_matches('/').to_string(),
+		] {
+			if !form.is_empty() {
+				why = why.replace(&form, label);
+			}
+		}
+	}
+	const MARK: &str = "for url (";
+	let mut out = String::new();
+	let mut rest = why.as_str();
+	while let Some(i) = rest.find(MARK) {
+		out.push_str(&rest[..i + MARK.len()]);
+		rest = &rest[i + MARK.len()..];
+		match rest.find(')') {
+			Some(j) => {
+				out.push_str(label);
+				rest = &rest[j..];
+			}
+			None => {
+				out.push_str(label);
+				out.push(')');
+				rest = "";
+			}
+		}
+	}
+	out.push_str(rest);
+	out
 }
 
 /// What `check` found at each endpoint.
@@ -267,11 +305,13 @@ impl ChainReader {
 					"{label} must use https:// in production"
 				)));
 			}
-			let parsed = url
-				.parse()
-				.map_err(|_| ChainError::Config(format!("{label} is not a URL")))?;
 			// alloy's own reqwest (a newer major than the aggregator client's).
 			use alloy::transports::http::reqwest;
+			let parsed: reqwest::Url = url
+				.trim()
+				.parse()
+				.map_err(|_| ChainError::Config(format!("{label} is not a URL")))?;
+			let parsed_text = parsed.to_string();
 			let http = reqwest::Client::builder()
 				.timeout(timeout)
 				.connect_timeout(timeout)
@@ -284,6 +324,7 @@ impl ChainReader {
 			endpoints.push(Endpoint {
 				label,
 				url,
+				parsed: parsed_text,
 				provider,
 			});
 		}
@@ -546,5 +587,25 @@ mod tests {
 		assert!(decode_lock(&dirty_address).is_err());
 		let bad_bool = words(&[w_a(1), w_u(1), w_a(2), w_a(3), w_u(1), w_u(2)]);
 		assert!(decode_lock(&bad_bool).is_err());
+	}
+}
+
+#[cfg(test)]
+mod scrub_tests {
+	use super::scrub_url;
+
+	#[test]
+	fn every_spelling_of_an_rpc_url_is_scrubbed() {
+		let raw = "https://RPC.example.com?apikey=K3Y";
+		let parsed = "https://rpc.example.com/?apikey=K3Y";
+		for why in [
+			format!("error sending request for url ({parsed})"),
+			format!("{raw} timed out"),
+			"error for url (https://rpc.example.com:443/?apikey=K3Y) after 30s".to_string(),
+		] {
+			let out = scrub_url(&why, &[raw, parsed], "base rpc[0]");
+			assert!(!out.contains("K3Y"), "{out}");
+			assert!(out.contains("base rpc[0]"), "{out}");
+		}
 	}
 }

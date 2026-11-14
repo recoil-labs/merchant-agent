@@ -38,6 +38,9 @@ use crate::store::{Store, StoreError, UserRow};
 pub const MAX_FAILURES: u32 = 5;
 pub const LOCKOUT: Duration = Duration::minutes(15);
 pub const IDLE: Duration = Duration::minutes(15);
+/// A session ends this long after sign-in however active it is, so a
+/// page left open (they refresh themselves) can't keep it alive forever.
+pub const MAX_SESSION: Duration = Duration::hours(12);
 pub const MIN_PASSWORD_CHARS: usize = 12;
 const TOTP_STEP: u64 = 30;
 
@@ -203,9 +206,15 @@ pub fn current_code(
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoginError {
 	/// Deliberately vague: never says which part was wrong.
-	#[error("wrong username, password or code")]
+	#[error(
+		"wrong username, password or code (5 wrong tries in a row lock an account for 15 minutes)"
+	)]
 	Invalid,
-	#[error("too many wrong attempts; this account is locked until {0}")]
+	/// Reads exactly like `Invalid`, so the reply never reveals that a
+	/// username exists (only an existing account can be locked).
+	#[error(
+		"wrong username, password or code (5 wrong tries in a row lock an account for 15 minutes)"
+	)]
 	Locked(DateTime<Utc>),
 	#[error("the console is unavailable: {0}")]
 	Unavailable(String),
@@ -253,29 +262,26 @@ pub fn login(
 	} else {
 		None
 	};
-	match (step, Role::parse(&user.role)) {
-		(Some(step), Some(role)) => {
-			store
-				.update_login_state(&user.username, 0, None, Some(step))
-				.map_err(unavailable)?;
-			Ok((user.username, role))
+	// The state change is made atomically in the store, against the row as
+	// it is then, not as it was read above: concurrent attempts each count,
+	// and one TOTP code signs in once.
+	if let (Some(step), Some(role)) = (step, Role::parse(&user.role)) {
+		if store
+			.record_login_success(&user.username, step, now)
+			.map_err(unavailable)?
+		{
+			return Ok((user.username, role));
 		}
-		_ => {
-			let failures = user.failed_attempts + 1;
-			if failures >= MAX_FAILURES {
-				let until = now + LOCKOUT;
-				store
-					.update_login_state(&user.username, 0, Some(until), None)
-					.map_err(unavailable)?;
-				tracing::warn!(username = %user.username, "console account locked after repeated failed logins");
-				Err(LoginError::Locked(until))
-			} else {
-				store
-					.update_login_state(&user.username, failures, None, None)
-					.map_err(unavailable)?;
-				Err(LoginError::Invalid)
-			}
+	}
+	match store
+		.record_login_failure(&user.username, MAX_FAILURES, LOCKOUT, now)
+		.map_err(unavailable)?
+	{
+		Some(until) => {
+			tracing::warn!(username = %user.username, "console account locked after repeated failed logins");
+			Err(LoginError::Locked(until))
 		}
+		None => Err(LoginError::Invalid),
 	}
 }
 
@@ -301,6 +307,7 @@ pub struct Session {
 	pub role: Role,
 	pub csrf: String,
 	pub last_seen: DateTime<Utc>,
+	pub signed_in: DateTime<Utc>,
 }
 
 fn token() -> String {
@@ -326,6 +333,7 @@ impl Sessions {
 				role,
 				csrf: token(),
 				last_seen: now,
+				signed_in: now,
 			},
 		);
 		t
@@ -334,7 +342,9 @@ impl Sessions {
 	/// The session for `token`, if it hasn't been idle too long. Touches it.
 	pub fn get(&self, token: &str, now: DateTime<Utc>) -> Option<Session> {
 		let mut map = self.map();
-		let live = map.get(token).is_some_and(|s| now - s.last_seen < IDLE);
+		let live = map
+			.get(token)
+			.is_some_and(|s| now - s.last_seen < IDLE && now - s.signed_in < MAX_SESSION);
 		if !live {
 			map.remove(token);
 			return None;
@@ -346,6 +356,13 @@ impl Sessions {
 
 	pub fn end(&self, token: &str) {
 		self.map().remove(token);
+	}
+
+	/// End every session of `username` (it was disabled, removed or
+	/// changed). Each request also re-checks the user, so this is just
+	/// prompt cleanup.
+	pub fn end_user(&self, username: &str) {
+		self.map().retain(|_, s| s.username != username);
 	}
 }
 

@@ -288,6 +288,12 @@ pub struct Server {
 	/// Must be set to bind anywhere but loopback (invariant 9).
 	#[serde(default)]
 	pub bind_public: bool,
+	/// Host names, besides localhost, the console answers to: the name of
+	/// a TLS proxy in front of it, if you use one. Requests for any other
+	/// host are refused, so a web page can't reach the console through DNS
+	/// rebinding.
+	#[serde(default)]
+	pub console_hostnames: Vec<String>,
 }
 
 fn default_console_bind() -> SocketAddr {
@@ -303,6 +309,7 @@ impl Default for Server {
 			console_bind: default_console_bind(),
 			health_bind: default_health_bind(),
 			bind_public: false,
+			console_hostnames: Vec::new(),
 		}
 	}
 }
@@ -548,6 +555,15 @@ impl RawConfig {
 					)),
 				}
 			}
+		}
+
+		// Pricing: in production every quote's rate must be checkable against
+		// a reference, and quotes on a rail with no reference are refused.
+		if prod && self.pricing.reference_rates.is_empty() {
+			p.push(
+				"pricing.reference_rates needs a reference rate for every rail you publish offers on (for example ng.nip) in production"
+					.into(),
+			);
 		}
 
 		// Rail.

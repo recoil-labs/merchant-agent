@@ -179,3 +179,19 @@ fn a_bad_email_setting_is_refused_without_echoing_the_smtp_url() {
 	.unwrap();
 	assert!(!e.contains("secret-password"), "{e}");
 }
+
+#[tokio::test]
+async fn an_urgent_alert_is_never_held_back_by_the_rate_limit() {
+	let (url, seen) = capture().await;
+	let alerter = Alerter::new(vec![Box::new(Webhook::new(Secret::new(url)))], 2);
+	let mut burst: Vec<Alert> = (0..5)
+		.map(|_| alert(false, AgentState::Held(HoldReason::Screening)))
+		.collect();
+	burst.push(alert(true, AgentState::Refunded));
+	assert_eq!(alerter.deliver(&burst, t("2026-11-13T12:00:10Z")).await, 3);
+	let sent = seen.lock().unwrap().clone();
+	assert!(
+		sent.iter().any(|m| m.to_string().contains("URGENT")),
+		"the urgent alert went out: {sent:?}"
+	);
+}

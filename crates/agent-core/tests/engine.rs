@@ -438,3 +438,73 @@ impl std::io::Write for CaptureWriter {
 		Ok(())
 	}
 }
+
+// ── audit fixes ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_trade_whose_id_is_not_a_plain_identifier_is_ignored() {
+	let world = World::new();
+	let mut odd = base_trade();
+	odd.id = format!("{TRADE_ID}/approve?");
+	world
+		.platform
+		.trades
+		.lock()
+		.unwrap()
+		.insert(odd.id.clone(), odd.clone());
+	let dir = tempfile::tempdir().unwrap();
+	let agent = world.agent(dir.path()).unwrap();
+	agent.tick().await.unwrap();
+	assert!(agent.store().get(&odd.id).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn sealed_bank_details_for_another_rail_are_held() {
+	// The sealed rail keys the per-payee limit and the deny-list; it must be
+	// the trade's rail, or one account could pass as many payees.
+	let world = World::new();
+	world.platform.edit(|t| t.rail = "ng.other".into());
+	let dir = tempfile::tempdir().unwrap();
+	let agent = world.agent(dir.path()).unwrap();
+	assert_eq!(
+		tick_until(&agent, |s| matches!(s, AgentState::Held(_))).await,
+		AgentState::Held(HoldReason::PayeeUnreadable)
+	);
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn a_lock_that_closed_after_it_was_verified_is_caught_before_paying() {
+	// Verified once, then refunded before the checks finished: the lock is
+	// read again right before the payout is reserved.
+	let world = World::new();
+	*world.platform.quotes_down.lock().unwrap() = true;
+	let dir = tempfile::tempdir().unwrap();
+	let agent = world.agent(dir.path()).unwrap();
+	agent.tick().await.unwrap();
+	assert_eq!(state(&agent), AgentState::LockVerified);
+	*world.locks.0.lock().unwrap() = LockOutcome::Problem(HoldReason::LockClosed);
+	*world.platform.quotes_down.lock().unwrap() = false;
+	assert_eq!(
+		tick_until(&agent, |s| matches!(s, AgentState::Held(_))).await,
+		AgentState::Held(HoldReason::LockClosed)
+	);
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[test]
+fn a_lock_near_its_refund_time_is_too_old_to_pay_against() {
+	use merchant_agent_core::engine::{
+		lock_too_old, ESCROW_REFUND_DELAY_SECS, LOCK_REFUND_SAFETY_SECS,
+	};
+	let locked = 1_700_000_000u64;
+	let edge = locked as i64 + ESCROW_REFUND_DELAY_SECS - LOCK_REFUND_SAFETY_SECS;
+	assert!(!lock_too_old(locked, locked as i64));
+	assert!(!lock_too_old(locked, edge - 1));
+	assert!(lock_too_old(locked, edge));
+	assert!(lock_too_old(
+		locked,
+		locked as i64 + ESCROW_REFUND_DELAY_SECS + 1
+	));
+	assert!(lock_too_old(u64::MAX, 0));
+}

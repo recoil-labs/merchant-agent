@@ -23,6 +23,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -152,6 +153,7 @@ pub fn mirror(conn: &mut rusqlite::Connection, dir: &Path) -> rusqlite::Result<u
 		let mut f = OpenOptions::new()
 			.create(true)
 			.append(true)
+			.mode(0o600)
 			.open(dir.join(FILE))?;
 		for e in &new {
 			let line = serde_json::to_string(e).map_err(std::io::Error::other)?;
