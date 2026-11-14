@@ -104,6 +104,9 @@ pub struct Console {
 	pub limits: Option<Limits>,
 	pub two_person: TwoPerson,
 	pub clock: Clock,
+	/// Host names besides localhost the console answers to
+	/// (`server.console_hostnames`).
+	pub hostnames: Vec<String>,
 }
 
 pub fn router(console: Arc<Console>) -> Router {
@@ -128,7 +131,78 @@ pub fn router(console: Arc<Console>) -> Router {
 			"/static/console.css",
 			get(|| async { asset("text/css", pages::CSS) }),
 		)
+		.layer(axum::middleware::from_fn_with_state(
+			console.clone(),
+			same_site_only,
+		))
 		.with_state(console)
+}
+
+/// Refuse what a web page elsewhere could send: a request for another host
+/// name (DNS rebinding onto the loopback console) and, for anything but a
+/// read, a cross-site request (a form on another site posting to /login or
+/// any action). Requests without these headers come from non-browser
+/// clients, which can't carry a browser's cookies anyway.
+async fn same_site_only(
+	State(c): State<Arc<Console>>,
+	req: axum::extract::Request,
+	next: axum::middleware::Next,
+) -> Response {
+	let refuse = || {
+		html(
+			StatusCode::FORBIDDEN,
+			pages::message(
+				"Not allowed",
+				"The console only answers requests from its own pages, on localhost or a host name in server.console_hostnames.",
+			),
+		)
+	};
+	let headers = req.headers();
+	let host = headers
+		.get(header::HOST)
+		.and_then(|v| v.to_str().ok())
+		.map(str::to_ascii_lowercase);
+	if let Some(host) = &host {
+		if !host_allowed(host, &c.hostnames) {
+			return refuse();
+		}
+	}
+	let reads = matches!(
+		*req.method(),
+		axum::http::Method::GET | axum::http::Method::HEAD
+	);
+	if !reads {
+		if headers
+			.get("sec-fetch-site")
+			.and_then(|v| v.to_str().ok())
+			.is_some_and(|v| v.eq_ignore_ascii_case("cross-site"))
+		{
+			return refuse();
+		}
+		if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+			let origin_host = origin
+				.split_once("://")
+				.map(|(_, rest)| rest.to_ascii_lowercase());
+			if origin_host.is_none() || origin_host != host {
+				return refuse();
+			}
+		}
+	}
+	next.run(req).await
+}
+
+/// Whether a `Host` header value (`name[:port]`) is one the console serves.
+fn host_allowed(host: &str, extra: &[String]) -> bool {
+	let name = if let Some(rest) = host.strip_prefix('[') {
+		rest.split(']')
+			.next()
+			.map(|n| format!("[{n}]"))
+			.unwrap_or_default()
+	} else {
+		host.rsplit_once(':').map_or(host, |(n, _)| n).to_string()
+	};
+	matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
+		|| extra.iter().any(|e| e.eq_ignore_ascii_case(&name))
 }
 
 // ── responses ────────────────────────────────────────────────────────────
@@ -200,10 +274,23 @@ fn token_from(headers: &HeaderMap) -> Option<String> {
 }
 
 /// The signed-in session, or a redirect to the login page.
+///
+/// The user is read again on every request: a session whose user has since
+/// been disabled, removed (also from the CLI, a different process) or given
+/// another role ends here, instead of living on until it idles out.
 fn session(c: &Console, headers: &HeaderMap) -> Result<Session, Response> {
-	token_from(headers)
-		.and_then(|t| c.sessions.get(&t, (c.clock)()))
-		.ok_or_else(|| to("/login", "Please sign in."))
+	let signed_out = || to("/login", "Please sign in.");
+	let token = token_from(headers).ok_or_else(signed_out)?;
+	let s = c.sessions.get(&token, (c.clock)()).ok_or_else(signed_out)?;
+	let current = c.store.user(&s.username).ok().flatten();
+	let still_valid = current
+		.as_ref()
+		.is_some_and(|u| !u.disabled && Role::parse(&u.role) == Some(s.role));
+	if !still_valid {
+		c.sessions.end(&token);
+		return Err(signed_out());
+	}
+	Ok(s)
 }
 
 fn require(s: &Session, role: Role) -> Result<(), Response> {
@@ -530,6 +617,9 @@ async fn user_action(
 	};
 	match c.store.set_user_disabled(&name, disabled, &s.username) {
 		Ok(true) => {
+			if disabled {
+				c.sessions.end_user(&name);
+			}
 			tracing::info!(admin = %s.username, user = %name, disabled, "console user changed");
 			to("/users", if disabled { "Disabled." } else { "Enabled." })
 		}

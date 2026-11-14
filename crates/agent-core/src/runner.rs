@@ -264,9 +264,10 @@ pub async fn run(
 		two_person: config.policy.two_person.clone(),
 		bind: config.server.console_bind,
 		health: config.server.health_bind,
+		hostnames: config.server.console_hostnames.clone(),
 	};
 
-	std::fs::create_dir_all(&config.storage.data_dir)
+	crate::store::private_dir(&config.storage.data_dir)
 		.map_err(|e| format!("{}: {e}", config.storage.data_dir.display()))?;
 	let store =
 		Arc::new(Store::open(&config.storage.data_dir, &holder_id()).map_err(|e| e.to_string())?);
@@ -332,14 +333,25 @@ pub async fn run(
 pub async fn alerter(config: &Config, secrets: &Secrets) -> Result<Alerter, String> {
 	let read = |what: &'static str| move |e: crate::secrets::SecretError| format!("{what}: {e}");
 	let a = &config.alerts;
+	let prod = config.mode == crate::config::Mode::Production;
 	let mut channels: Vec<Box<dyn Notifier>> = Vec::new();
 	if let Some(r) = &a.webhook {
-		channels.push(Box::new(Webhook::new(
-			secrets
-				.resolve(r)
-				.await
-				.map_err(read("the alert webhook"))?,
-		)));
+		let url = secrets
+			.resolve(r)
+			.await
+			.map_err(read("the alert webhook"))?;
+		// Production refuses plain-HTTP connections (invariant 9), alert
+		// channels included: a webhook URL carries its own credential.
+		if prod
+			&& !url
+				.expose()
+				.trim()
+				.to_ascii_lowercase()
+				.starts_with("https://")
+		{
+			return Err("the alert webhook must be an https:// URL in production".into());
+		}
+		channels.push(Box::new(Webhook::new(url)));
 	}
 	if let Some(r) = &a.pagerduty_routing_key {
 		channels.push(Box::new(PagerDuty::new(
@@ -354,9 +366,26 @@ pub async fn alerter(config: &Config, secrets: &Secrets) -> Result<Alerter, Stri
 			.resolve(&e.smtp_url)
 			.await
 			.map_err(read("the SMTP URL"))?;
+		if prod && !smtp_url_is_encrypted(url.expose()) {
+			return Err(
+				"the SMTP URL must use TLS in production: smtps://… (port 465), or smtp://…?tls=required for STARTTLS".into(),
+			);
+		}
 		channels.push(Box::new(Email::new(&url, &e.from, &e.to)?));
 	}
 	Ok(Alerter::new(channels, a.max_per_minute))
+}
+
+/// Whether an SMTP URL makes lettre encrypt the connection: implicit TLS
+/// (`smtps://`), or `smtp://` with `tls=required` (STARTTLS, refused if the
+/// server doesn't offer it). A bare `smtp://` may send mail and the
+/// password in the clear.
+fn smtp_url_is_encrypted(url: &str) -> bool {
+	let u = url.trim().to_ascii_lowercase();
+	u.starts_with("smtps://")
+		|| (u.starts_with("smtp://")
+			&& u.split_once('?')
+				.is_some_and(|(_, q)| q.split('&').any(|kv| kv == "tls=required")))
 }
 
 /// The read-only settings the console shows. References, never secrets.
@@ -431,6 +460,7 @@ struct ConsoleParts {
 	two_person: crate::config::TwoPerson,
 	bind: std::net::SocketAddr,
 	health: std::net::SocketAddr,
+	hostnames: Vec<String>,
 }
 
 /// What runs around the engine: alerts, the console, the pace.
@@ -497,6 +527,7 @@ where
 		limits: console.limits,
 		two_person: console.two_person,
 		clock: Arc::new(chrono::Utc::now),
+		hostnames: console.hostnames,
 	});
 	let listener = tokio::net::TcpListener::bind(bind)
 		.await
@@ -534,10 +565,11 @@ where
 			}
 			Err(e) => tracing::error!(error = %e, "tick failed; trying again next tick"),
 		}
+		// Every tick, even with nothing new: a summary of alerts held back
+		// last minute goes out as soon as the minute turns, not only when
+		// some later alert happens to arrive.
 		let alerts = engine.take_alerts();
-		if !alerts.is_empty() {
-			alerter.deliver(&alerts, chrono::Utc::now()).await;
-		}
+		alerter.deliver(&alerts, chrono::Utc::now()).await;
 		tokio::select! {
 			_ = &mut stop => {
 				tracing::info!("stopping; a payout already with the bank is checked by key on the next start");
@@ -545,5 +577,22 @@ where
 			}
 			_ = tokio::time::sleep(poll) => {}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::smtp_url_is_encrypted;
+
+	#[test]
+	fn only_encrypted_smtp_urls_pass_in_production() {
+		assert!(smtp_url_is_encrypted("smtps://u:p@mail.example.com:465"));
+		assert!(smtp_url_is_encrypted(
+			"smtp://u:p@mail.example.com:587?tls=required"
+		));
+		assert!(!smtp_url_is_encrypted("smtp://u:p@mail.example.com:587"));
+		assert!(!smtp_url_is_encrypted(
+			"smtp://u:p@mail.example.com:587?tls=opportunistic"
+		));
 	}
 }

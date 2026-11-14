@@ -180,6 +180,14 @@ impl Locks for ChainLocks {
 			return problem(HoldReason::LockMismatch);
 		};
 		match reader.verify(&expected).await {
+			// The escrow lets anyone refund a lock to its funder once it is
+			// REFUND_DELAY old, without the attestor. A lock that close to
+			// that point can't be relied on to pay the merchant back.
+			Ok(LockVerdict::Verified { locked_at, .. })
+				if lock_too_old(locked_at, Utc::now().timestamp()) =>
+			{
+				problem(HoldReason::LockClosed)
+			}
 			Ok(LockVerdict::Verified { protocol_fee, .. }) => Ok(LockCheck {
 				outcome: LockOutcome::Verified,
 				protocol_fee: Some(protocol_fee.to_string()),
@@ -195,6 +203,24 @@ impl Locks for ChainLocks {
 			Err(e) => Err(e.to_string()),
 		}
 	}
+}
+
+/// `AttestedEscrow.REFUND_DELAY`: after this long, anyone can refund a lock
+/// to its funder without the attestor.
+pub const ESCROW_REFUND_DELAY_SECS: i64 = 7 * 24 * 60 * 60;
+/// Don't start paying against a lock with less than this left before it
+/// becomes refundable: the merchant still needs the attestor to release it.
+pub const LOCK_REFUND_SAFETY_SECS: i64 = 24 * 60 * 60;
+
+/// Whether a lock made at `locked_at` (Unix seconds, from the chain) is too
+/// close to, or past, the point where its funder can take it back.
+pub fn lock_too_old(locked_at: u64, now: i64) -> bool {
+	let Ok(locked_at) = i64::try_from(locked_at) else {
+		return true;
+	};
+	now >= locked_at
+		.saturating_add(ESCROW_REFUND_DELAY_SECS)
+		.saturating_sub(LOCK_REFUND_SAFETY_SECS)
 }
 
 /// What the checks found: enough to reserve the payout. No personal data.
@@ -260,8 +286,15 @@ impl Checks for PayeeChecks {
 			.payee_sealed
 			.as_ref()
 			.ok_or(HoldReason::PayeeUnreadable)?;
-		payee::open(envelope, &self.key, &record.payee_commitment)
-			.map_err(|_| HoldReason::PayeeUnreadable)
+		let opened = payee::open(envelope, &self.key, &record.payee_commitment)
+			.map_err(|_| HoldReason::PayeeUnreadable)?;
+		// The sealed rail is part of the payee tag that keys the per-payee
+		// limit and the deny-list, but the payout ignores it. It must be the
+		// trade's rail, or one account could appear as many payees.
+		if !opened.identity.rail.eq_ignore_ascii_case(&trade.rail) {
+			return Err(HoldReason::PayeeUnreadable);
+		}
+		Ok(opened)
 	}
 }
 
@@ -318,6 +351,10 @@ pub struct EngineConfig {
 	pub two_person: config::TwoPerson,
 	/// The merchant's reference rate per rail, recorded with each new quote.
 	pub reference_rates: BTreeMap<String, String>,
+	/// The decimals of the pinned USDC on each configured chain (CAIP-2).
+	/// A quote on any other chain, or claiming other decimals, is never
+	/// recorded: its terms could not have come from this merchant.
+	pub chain_usdc_decimals: BTreeMap<String, u8>,
 }
 
 impl EngineConfig {
@@ -334,6 +371,7 @@ impl EngineConfig {
 			limits: None,
 			two_person: policy.two_person.clone(),
 			reference_rates: BTreeMap::new(),
+			chain_usdc_decimals: BTreeMap::new(),
 		}
 	}
 
@@ -347,6 +385,11 @@ impl EngineConfig {
 			.reference_rates
 			.iter()
 			.map(|(rail, rate)| (rail.clone(), rate.as_str().to_string()))
+			.collect();
+		cfg.chain_usdc_decimals = config
+			.chains
+			.iter()
+			.map(|c| (c.caip2.clone(), c.usdc_decimals))
 			.collect();
 		cfg
 	}
@@ -440,6 +483,8 @@ pub struct Engine<Pl, Lo, Ch, Ra, Cl> {
 	last_heartbeat: std::sync::atomic::AtomicI64,
 	heartbeat_unsupported: std::sync::atomic::AtomicBool,
 	readiness: Mutex<Option<(std::time::Instant, Readiness)>>,
+	/// Quote ids already refused (and warned about) this run.
+	refused_quotes: Mutex<std::collections::HashSet<String>>,
 }
 
 impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, Lo, Ch, Ra, Cl> {
@@ -472,6 +517,7 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 			last_heartbeat: std::sync::atomic::AtomicI64::new(0),
 			heartbeat_unsupported: std::sync::atomic::AtomicBool::new(false),
 			readiness: Mutex::new(None),
+			refused_quotes: Mutex::new(std::collections::HashSet::new()),
 		})
 	}
 
@@ -504,6 +550,35 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 		}
 	}
 
+	/// Why a quote from the aggregator's book can't be one this merchant
+	/// published, or `None` if it can. The quote book drives pricing, so its
+	/// terms must match what the agent pins locally: this operator's
+	/// cash-out, USDC on a configured chain with that chain's decimals, and
+	/// (when the merchant set any reference rates) a rail with a reference,
+	/// so the rate band always applies.
+	fn quote_refusal(&self, q: &Quote) -> Option<&'static str> {
+		if !crate::aggregator::valid_id(&q.id) {
+			return Some("the quote id is not a plain identifier");
+		}
+		if q.solver_id != self.cfg.solver_id || q.direction != Direction::Offramp {
+			return Some("not this operator's cash-out quote");
+		}
+		if q.asset != "USDC" {
+			return Some("not a USDC quote");
+		}
+		match self.cfg.chain_usdc_decimals.get(&q.chain) {
+			None => return Some("not on a chain in your config"),
+			Some(d) if *d != q.asset_decimals => {
+				return Some("its asset decimals differ from the pinned USDC's")
+			}
+			Some(_) => {}
+		}
+		if !self.cfg.reference_rates.is_empty() && !self.cfg.reference_rates.contains_key(&q.rail) {
+			return Some("no reference rate is set for its rail, so its rate can't be checked");
+		}
+		None
+	}
+
 	/// One pass of the main loop. Platform and chain hiccups are retried on
 	/// the next tick; only storage problems (or a lost lease) are errors.
 	pub async fn tick(&self) -> Result<(), EngineError> {
@@ -514,6 +589,18 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 		// last tick can be priced (design §4.4).
 		let fresh = match self.platform.quotes().await {
 			Ok(quotes) => {
+				let quotes: Vec<Quote> = quotes
+					.into_iter()
+					.filter(|q| match self.quote_refusal(q) {
+						None => true,
+						Some(why) => {
+							if self.refused_quotes.lock().unwrap().insert(q.id.clone()) {
+								tracing::warn!(quote_id = %q.id, reason = why, "not recording a quote that could not be this merchant's; trades on it will be held as an unknown offer");
+							}
+							false
+						}
+					})
+					.collect();
 				let rates = &self.cfg.reference_rates;
 				let added =
 					self.store
@@ -558,6 +645,10 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 		match self.platform.awaiting_fiat().await {
 			Ok(trades) => {
 				for t in trades {
+					if !crate::aggregator::valid_id(&t.id) {
+						tracing::warn!("ignoring a trade whose id is not a plain identifier");
+						continue;
+					}
 					if t.solver_id != self.cfg.solver_id || t.direction != Direction::Offramp {
 						tracing::warn!(trade_id = %t.id, "ignoring a trade that is not this operator's cash-out");
 						continue;
@@ -737,6 +828,26 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 					return self
 						.apply(rec, &Event::Checks(Err(HoldReason::NameMismatch)), masked)
 						.await;
+				}
+				// Read the lock again right before the payout can be reserved:
+				// it may have been refunded, or grown too old to rely on, since
+				// it was first verified (a trade can wait here for a while).
+				match self.locks.check(trade).await {
+					Ok(lc) => match lc.outcome {
+						LockOutcome::Verified => {}
+						LockOutcome::Problem(r) => {
+							return self.apply(rec, &Event::Checks(Err(r)), masked).await;
+						}
+						LockOutcome::Wait => {
+							return self
+								.apply(rec, &Event::Checks(Err(HoldReason::LockClosed)), masked)
+								.await;
+						}
+					},
+					Err(e) => {
+						tracing::warn!(trade_id = %rec.trade_id, error = %e, "could not re-read the lock before paying; next tick");
+						return Ok(rec);
+					}
 				}
 				self.run_checks(rec, trade, masked).await
 			}

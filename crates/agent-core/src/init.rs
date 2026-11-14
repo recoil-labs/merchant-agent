@@ -20,6 +20,11 @@ pub struct Answers {
 	/// Listen on every interface, for a container: its ports are reached
 	/// through the container runtime, never 127.0.0.1 inside it.
 	pub bind_all: bool,
+	/// For Kubernetes: the health port listens on every interface (probes
+	/// and Prometheus reach it by pod IP), the console stays on 127.0.0.1
+	/// (kubectl port-forward reaches the pod's localhost). Ignored with
+	/// `bind_all`.
+	pub public_health: bool,
 	/// Read the three secrets from files in this directory (`api-key`,
 	/// `payee-key`, `payee-tag-pepper`) instead of environment variables.
 	pub secrets_dir: Option<PathBuf>,
@@ -231,6 +236,13 @@ logging:
 			"  # In a container: listen on every interface inside it, and publish\n\
 			 \x20 # the console only on the host's 127.0.0.1 (the compose file does).\n\
 			 \x20 console_bind: \"0.0.0.0:8740\"\n\
+			 \x20 health_bind: \"0.0.0.0:8741\"\n\
+			 \x20 bind_public: true\n"
+		} else if a.public_health {
+			"  # In Kubernetes: health on every interface for probes and\n\
+			 \x20 # Prometheus; the console only on the pod's 127.0.0.1, which\n\
+			 \x20 # kubectl port-forward reaches. Nothing else can reach it.\n\
+			 \x20 console_bind: \"127.0.0.1:8740\"\n\
 			 \x20 health_bind: \"0.0.0.0:8741\"\n\
 			 \x20 bind_public: true\n"
 		} else {

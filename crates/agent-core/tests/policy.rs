@@ -784,3 +784,50 @@ fn every_hold_reason_has_a_test() {
 	}
 	assert_eq!(covered.len(), HoldReason::ALL.len());
 }
+
+// ── quotes that can't be the merchant's are never priced on (audit fixes) ─
+
+#[tokio::test]
+async fn a_quote_whose_decimals_differ_from_the_pinned_usdc_is_never_recorded() {
+	// A book whose decimals are 0 would make 1 micro-USDC price as 1 USDC.
+	let world = world();
+	world.platform.quotes.lock().unwrap()[0].asset_decimals = 0;
+	assert_eq!(
+		run(&world, Setup::default()).await,
+		AgentState::Held(HoldReason::UnknownQuote)
+	);
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn a_quote_on_a_rail_without_a_reference_rate_is_never_recorded() {
+	// Once any reference rate is set, a rail without one can't skip the band.
+	let world = world();
+	let mut setup = Setup::default();
+	setup
+		.cfg
+		.reference_rates
+		.insert("ng.other".into(), "1520.50".into());
+	assert_eq!(
+		run(&world, setup).await,
+		AgentState::Held(HoldReason::UnknownQuote)
+	);
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn a_quote_for_another_operator_or_chain_is_never_recorded() {
+	for edit in [
+		(|q: &mut Quote| q.solver_id = "solver-2222222222222222222222222222222222222222".into())
+			as fn(&mut Quote),
+		|q: &mut Quote| q.chain = "eip155:1".into(),
+		|q: &mut Quote| q.asset = "DAI".into(),
+	] {
+		let world = world();
+		edit(&mut world.platform.quotes.lock().unwrap()[0]);
+		assert_eq!(
+			run(&world, Setup::default()).await,
+			AgentState::Held(HoldReason::UnknownQuote)
+		);
+	}
+}

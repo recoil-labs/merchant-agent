@@ -719,7 +719,16 @@ fn on_platform(
 				bank_confirmed: true,
 			}),
 			S::Paying | S::Paid => alert(S::NeedsPerson(PersonReason::ReportedElsewhere), true),
-			S::Reported { .. } if platform == P::Disputed => with(
+			// Reported while the bank still said pending: keep asking the
+			// bank. Only once it confirms (Reported { true }, next event)
+			// does the trade move to Disputed and file "Paid" evidence; if
+			// the bank fails it instead, a person is told urgently.
+			S::Reported {
+				bank_confirmed: false,
+			} if platform == P::Disputed => same(),
+			S::Reported {
+				bank_confirmed: true,
+			} if platform == P::Disputed => with(
 				S::Disputed,
 				vec![E::AddDisputeEvidence, E::Alert { urgent: false }],
 			),

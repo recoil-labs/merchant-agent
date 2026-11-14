@@ -60,7 +60,7 @@ echo "    the aggregator, as pods see it: http://$relay:$port"
 
 echo "[3] the README's steps: config, Secret, apply"
 cp -R "$here/../k8s" "$work/k8s"
-docker run --rm "$image" init --yes --stdout --bind-all \
+docker run --rm "$image" init --yes --stdout --public-health \
   --secrets-dir /run/merchant-agent/secrets \
   --solver-id "$solver" --wallet "$op_addr" \
   --aggregator-url "http://$relay:$port" \

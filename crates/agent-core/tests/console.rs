@@ -62,6 +62,7 @@ impl Harness {
 				approve_over: None,
 			},
 			clock: Arc::new(move || *clock_now.lock().unwrap()),
+			hostnames: vec![],
 		});
 		Self {
 			world,
@@ -243,11 +244,13 @@ async fn five_failures_lock_the_account_until_the_lockout_ends() {
 				],
 			)
 			.await;
-		assert_eq!(
-			decoded(&location(&r)).contains("locked"),
-			i == 5,
+		// The reply never says "locked": that would reveal the user exists.
+		assert!(
+			decoded(&location(&r)).starts_with("/login?msg=wrong username, password or code"),
 			"attempt {i}"
 		);
+		let locked = h.console.store.user("ola").unwrap().unwrap().locked_until;
+		assert_eq!(locked.is_some(), i == 5, "attempt {i}");
 	}
 	let code = h.code("ola");
 	let r = h
@@ -258,7 +261,7 @@ async fn five_failures_lock_the_account_until_the_lockout_ends() {
 		)
 		.await;
 	assert!(
-		decoded(&location(&r)).contains("locked"),
+		decoded(&location(&r)).starts_with("/login?msg=wrong username"),
 		"even the right password, while locked"
 	);
 	h.advance(LOCKOUT + ChronoDuration::seconds(1));
@@ -541,6 +544,7 @@ async fn a_reveal_is_recorded_shown_once_and_hidden_after_a_minute() {
 			approve_over: None,
 		},
 		clock: Arc::new(move || *clock_now.lock().unwrap()),
+		hostnames: vec![],
 	});
 	let h = Harness {
 		world,
@@ -603,4 +607,108 @@ async fn a_reveal_is_recorded_shown_once_and_hidden_after_a_minute() {
 		decoded(&location(&r)).contains("Not shown"),
 		"no task, no reveal"
 	);
+}
+
+// ── audit fixes ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn disabling_or_removing_a_user_ends_their_sessions() {
+	let h = Harness::new("TEST PAYEE").await;
+	let (ada, _) = h.login("ada").await;
+	let (root, root_csrf) = h.login("root").await;
+	assert_eq!(
+		h.get("/exceptions", Some(&ada)).await.status(),
+		StatusCode::OK
+	);
+	h.post("/users/ada/disable", Some(&root), &[("csrf", &root_csrf)])
+		.await;
+	let r = h.get("/exceptions", Some(&ada)).await;
+	assert!(location(&r).starts_with("/login"), "disabled: signed out");
+
+	// Removed by the CLI (another process): the next request signs out.
+	let (vic, _) = h.login("vic").await;
+	h.console.store.remove_user("vic", "cli").unwrap();
+	let r = h.get("/", Some(&vic)).await;
+	assert!(location(&r).starts_with("/login"), "removed: signed out");
+}
+
+#[tokio::test]
+async fn a_session_ends_after_its_maximum_age_however_active() {
+	let h = Harness::new("TEST PAYEE").await;
+	let (vic, _) = h.login("vic").await;
+	for _ in 0..60 {
+		h.advance(ChronoDuration::minutes(14));
+		let r = h.get("/", Some(&vic)).await;
+		if r.status() != StatusCode::OK {
+			assert!(location(&r).starts_with("/login"));
+			return;
+		}
+	}
+	panic!("an active session never ended");
+}
+
+#[tokio::test]
+async fn cross_site_and_foreign_host_requests_are_refused() {
+	let h = Harness::new("TEST PAYEE").await;
+	let form = "username=ola&password=nope%20nope%20nope&code=123456";
+	let post = |host: &str, extra: Option<(&str, &str)>| {
+		let mut req = Request::post("/login")
+			.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+			.header(header::HOST, host);
+		if let Some((k, v)) = extra {
+			req = req.header(k, v);
+		}
+		req.body(Body::from(form)).unwrap()
+	};
+	// DNS rebinding: a page whose host name now points at 127.0.0.1.
+	let r = h.send(post("attacker.example:8740", None)).await;
+	assert_eq!(r.status(), StatusCode::FORBIDDEN);
+	// A form on another site posting to the console.
+	let r = h
+		.send(post(
+			"127.0.0.1:8740",
+			Some(("origin", "https://attacker.example")),
+		))
+		.await;
+	assert_eq!(r.status(), StatusCode::FORBIDDEN);
+	let r = h
+		.send(post(
+			"127.0.0.1:8740",
+			Some(("sec-fetch-site", "cross-site")),
+		))
+		.await;
+	assert_eq!(r.status(), StatusCode::FORBIDDEN);
+	// None of those counted as a failed sign-in.
+	assert_eq!(
+		h.console
+			.store
+			.user("ola")
+			.unwrap()
+			.unwrap()
+			.failed_attempts,
+		0
+	);
+	// The console's own page, on localhost, still works.
+	let r = h
+		.send(post(
+			"127.0.0.1:8740",
+			Some(("origin", "http://127.0.0.1:8740")),
+		))
+		.await;
+	assert_eq!(r.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn an_operator_cannot_clear_an_automatic_pause_by_pausing_again() {
+	let h = Harness::new("TEST PAYEE").await;
+	h.agent.pause("agent", true).await.unwrap();
+	let (ola, ola_csrf) = h.login("ola").await;
+	h.post("/pause", Some(&ola), &[("csrf", &ola_csrf)]).await;
+	assert_eq!(
+		h.post("/resume", Some(&ola), &[("csrf", &ola_csrf)])
+			.await
+			.status(),
+		StatusCode::FORBIDDEN
+	);
+	assert!(h.agent.store().is_paused().unwrap());
 }

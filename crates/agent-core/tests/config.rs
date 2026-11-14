@@ -11,6 +11,7 @@ fn sandbox_yaml() -> String {
 		aggregator_url: "http://127.0.0.1:4000".into(),
 		data_dir: "/var/lib/merchant-agent".into(),
 		bind_all: false,
+		public_health: false,
 		secrets_dir: None,
 	})
 }

@@ -304,6 +304,7 @@ impl World {
 				approve_over: None,
 			},
 			reference_rates: Default::default(),
+			chain_usdc_decimals: [("eip155:84532".to_string(), 6u8)].into_iter().collect(),
 		}
 	}
 

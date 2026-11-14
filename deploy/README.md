@@ -96,7 +96,7 @@ The database and the audit log live in the `merchant-agent_data` volume.
 
 ```bash
 docker run --rm ghcr.io/recoil-labs/merchant-agent:latest init --yes --stdout \
-  --bind-all --secrets-dir /run/merchant-agent/secrets \
+  --public-health --secrets-dir /run/merchant-agent/secrets \
   --solver-id solver-… --wallet 0x… --aggregator-url https://api.recoilpay.com \
   --data-dir /var/lib/merchant-agent > k8s/merchant-agent.yaml
 ```

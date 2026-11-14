@@ -271,7 +271,9 @@ impl Alerter {
 				} else {
 					tracing::warn!(trade_id = %a.trade_id, "{}", crate::runner::describe(a));
 				}
-				if w.sent < self.max_per_minute {
+				// Urgent alerts always go out: they mean money may already
+				// have moved wrongly, and a flood of others must not bury them.
+				if a.urgent || w.sent < self.max_per_minute {
 					w.sent += 1;
 					out.push(Message::from_alert(a));
 				} else {

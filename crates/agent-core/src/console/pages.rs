@@ -310,7 +310,7 @@ fn action(
 	class: &str,
 ) -> Markup {
 	html! {
-		form method="post" action=(format!("/trades/{trade_id}/{act}")) {
+		form method="post" action=(format!("/trades/{}/{act}", path_segment(trade_id))) {
 			input type="hidden" name="csrf" value=(s.csrf);
 			@if with_reference {
 				input name="reference" placeholder="Bank reference" maxlength="64" required;
@@ -470,7 +470,7 @@ pub fn users(s: &Session, list: &[UserRow], flash: Option<&str>) -> Markup {
 						td { @if u.disabled { "Disabled" } @else if u.locked_until.is_some() { "Locked after failed sign-ins" } @else { "Active" } }
 						td {
 							@if u.username != s.username {
-								form method="post" action=(format!("/users/{}/{}", u.username, if u.disabled { "enable" } else { "disable" })) {
+								form method="post" action=(format!("/users/{}/{}", path_segment(&u.username), if u.disabled { "enable" } else { "disable" })) {
 									input type="hidden" name="csrf" value=(s.csrf);
 									button.quiet type="submit" { @if u.disabled { "Enable" } @else { "Disable" } }
 								}
@@ -481,4 +481,19 @@ pub fn users(s: &Session, list: &[UserRow], flash: Option<&str>) -> Markup {
 			}
 		},
 	)
+}
+
+/// Percent-encode a value for one URL path segment, so an id can never
+/// add a `/`, `?`, `#` or `..` to a form's action. Ids are also checked
+/// when trades arrive; this keeps any stored before that safe too.
+fn path_segment(s: &str) -> String {
+	s.bytes()
+		.map(|b| {
+			if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
+				(b as char).to_string()
+			} else {
+				format!("%{b:02X}")
+			}
+		})
+		.collect()
 }

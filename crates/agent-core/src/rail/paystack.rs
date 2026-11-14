@@ -252,6 +252,16 @@ impl PaystackRail {
 	}
 }
 
+/// Whether a refusal says the transfer reference is already in use.
+fn reference_taken(message: &str) -> bool {
+	let m = message.to_ascii_lowercase();
+	m.contains("reference")
+		&& (m.contains("exist")
+			|| m.contains("unique")
+			|| m.contains("duplicate")
+			|| m.contains("already"))
+}
+
 fn status_of(t: &Transfer, reference: &str) -> PayoutStatus {
 	let why = || {
 		clean(
@@ -388,6 +398,17 @@ impl PayoutRail for PaystackRail {
 			// saying no money moved.
 			Answer::Refused(s, m) => match self.verify(reference).await? {
 				Some(t) => Ok(outcome_of(&t, reference)),
+				// Paystack says the reference is taken, yet can't show the
+				// transfer yet: a transfer under it exists (or is being
+				// created). That is not "no money moved", so never let it
+				// become a rejection a person could re-pay under a new key.
+				None if reference_taken(&m) => {
+					tracing::error!(
+						reference,
+						"Paystack says this reference is already used but can't show the transfer; treating the outcome as unknown"
+					);
+					Ok(SendOutcome::Unknown)
+				}
 				None => Ok(SendOutcome::Rejected {
 					reason: format!("Paystack refused the transfer ({s}): {m}"),
 				}),
