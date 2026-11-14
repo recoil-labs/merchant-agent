@@ -1,0 +1,95 @@
+# Exactly one agent. A StatefulSet with replicas: 1 never runs two pods at
+# once during a rollout (the old pod stops before the new one starts), and
+# the agent's lease on its volume refuses a second one regardless.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: merchant-agent
+  labels: {app: merchant-agent}
+spec:
+  replicas: 1
+  serviceName: merchant-agent
+  selector:
+    matchLabels: {app: merchant-agent}
+  updateStrategy: {type: RollingUpdate}
+  template:
+    metadata:
+      labels: {app: merchant-agent}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8741"
+        prometheus.io/path: /metrics
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        # Kubernetes mounts Secrets owned by root; the agent only reads
+        # secret files that are its own and private (0400). Copy them, as
+        # the agent's user, into memory.
+        - name: secrets
+          image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+          command: ["sh", "-c", "for f in /secrets-in/*; do cp \"$f\" /secrets/ && chmod 0400 \"/secrets/$(basename \"$f\")\"; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            limits: {cpu: 100m, memory: 32Mi}
+          volumeMounts:
+            - {name: secrets-in, mountPath: /secrets-in, readOnly: true}
+            - {name: secrets, mountPath: /secrets}
+      containers:
+        - name: agent
+          image: merchant-agent
+          args: ["run"]
+          env:
+            - {name: MERCHANT_AGENT_CONFIG, value: /etc/merchant-agent/merchant-agent.yaml}
+          ports:
+            - {name: console, containerPort: 8740}
+            - {name: health, containerPort: 8741}
+          startupProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 20
+          # Ready = holds the lease, the database takes writes, RecoilPay and
+          # the RPCs answer, and payouts aren't paused.
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/merchant-agent, readOnly: true}
+            - {name: data, mountPath: /var/lib/merchant-agent}
+            - {name: secrets, mountPath: /run/merchant-agent/secrets, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: merchant-agent-config}
+        - name: secrets-in
+          secret:
+            secretName: merchant-agent-secrets
+            defaultMode: 0440
+        - name: secrets
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+  volumeClaimTemplates:
+    # The database and the audit log. Back this volume up.
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 1Gi}

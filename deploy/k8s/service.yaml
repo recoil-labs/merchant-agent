@@ -1,0 +1,13 @@
+# Headless, for the StatefulSet and for Prometheus to find the health port.
+# The console is not exposed: reach it with
+#   kubectl -n merchant-agent port-forward pod/merchant-agent-0 8740
+apiVersion: v1
+kind: Service
+metadata:
+  name: merchant-agent
+  labels: {app: merchant-agent}
+spec:
+  clusterIP: None
+  selector: {app: merchant-agent}
+  ports:
+    - {name: health, port: 8741, targetPort: health}

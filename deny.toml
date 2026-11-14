@@ -1,0 +1,59 @@
+# cargo-deny: what the agent may depend on. Run with `cargo deny check`.
+# The agent handles money and bank details, so: no known vulnerabilities,
+# only permissive licences, crates only from crates.io.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails the check, including unmaintained crates
+# that are reachable from the agent. Exceptions go here, each with a reason.
+ignore = [
+  # crypto-bigint 0.5 timing issues. The agent's own secret arithmetic (the
+  # payee key's ECDH) is on k256 0.14, which uses the fixed crypto-bigint
+  # 0.7. The 0.5 copy comes only through alloy's k256 0.13, used for
+  # on-chain reads; the agent holds no signing key and never signs, so no
+  # secret reaches it. Drop this once alloy moves to k256 0.14.
+  { id = "RUSTSEC-2026-0387", reason = "only alloy's copy, which never touches a secret" },
+  # paste: unmaintained, no successor. A proc-macro, run at compile time
+  # inside alloy; it is not in the running agent.
+  { id = "RUSTSEC-2024-0436", reason = "compile-time macro in alloy" },
+  # unsafe-libyaml (under serde_yaml_ng): unmaintained. It parses only the
+  # operator's own config file, written by `init` and readable only by the
+  # operator; never input from RecoilPay, a customer or the network.
+  { id = "RUSTSEC-2024-0449", reason = "parses only the operator's own config file" },
+]
+
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "0BSD",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+# The agent's own crates are unpublished (publish = false).
+private = { ignore = true }
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# The workspace's own path dependencies carry no version.
+allow-wildcard-paths = true
+deny = [
+  # OpenSSL: the agent is rustls only.
+  { crate = "openssl-sys", reason = "rustls only" },
+  { crate = "native-tls", reason = "rustls only" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

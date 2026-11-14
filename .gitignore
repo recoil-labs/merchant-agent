@@ -1,0 +1,6 @@
+/target
+/merchant-agent-data
+# A merchant's own deploy files: secrets and their config.
+/deploy/.env
+/deploy/config/
+/deploy/k8s/merchant-agent.yaml

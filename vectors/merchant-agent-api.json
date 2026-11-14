@@ -1,0 +1,151 @@
+{
+  "_about": "Response shapes of the aggregator routes the Merchant Agent calls, with every optional field present. The agent's fake aggregator (repo recoil-labs/merchant-agent, crates/agent-core/tests/aggregator.rs) serves these, and recoil-core/aggregator/crates/api/tests/merchant_agent_contract.rs checks that the real types serialise to exactly these keys (chains: at least the keys the agent reads). Change a response type and that test fails until this file and the agent are updated together. payee_sealed and payee_commitment are the 'NIP payee' case from fiat-payee.json; amounts are the agent design note §2's worked example. Every value is a test value.",
+  "ownFiatTrade": {
+    "id": "ft-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
+    "quote_id": "fq-3f2b8c1e-5a6d-4e7f-8a9b-0c1d2e3f4a5b",
+    "solver_id": "solver-1111111111111111111111111111111111111111",
+    "direction": "offramp",
+    "chain": "eip155:84532",
+    "asset": "USDC",
+    "asset_minor_units": "100000000",
+    "fiat_currency": "NGN",
+    "fiat_minor_units": "15081152",
+    "rail": "ng.nip",
+    "rate": "1520.50",
+    "fee_minor_units": "47823",
+    "user_address": "0x2222222222222222222222222222222222222222",
+    "solver_address": "0x1111111111111111111111111111111111111111",
+    "state": "awaiting_fiat",
+    "deadline_at": "2026-11-13T12:15:00Z",
+    "resolution_note": "escrow funded by user",
+    "payee_sealed": {
+      "v": 1,
+      "alg": "ECIES-secp256k1-AES256GCM",
+      "epk": "0x04bcc35e8bd2cf66e0ecd6a7be0e08235285463644b2fb8a703f23cfd4d5e41f7ad76089deb6364c0ea2c71eba955fa755f91321a77b08d9aa5749226fb999aa31",
+      "iv": "0x33128acab27eedd81a00a58e",
+      "ct": "0x6ad2813291ce92d4d92882300373d2f6ba6bd54c8c47fcdf58ef47458b9f56ce16d5414eec14553eb7d492a9faa85d7c6a2113060f0a03b01a3cffd4cc2b1ca7ddd4622aa90d2b7d32e66ce815956c3c383daeb7256299fd746ee5c69d243cc800dc66e4c0d24233f9f5af564935ebe23e7a6838b75ee27ca13345240381f4eb1de6e61d00c363db8b4b36add9035500fa21912dad9d5990bed1dacc9817e531",
+      "tag": "0x39e7e2c056db0be4320600fa7be69179"
+    },
+    "payee_commitment": "0x26ebc7157b857f584f6d0da3585adb2925596ced588baf2489e8b9c6b412a099",
+    "payment_reference": "RP-TEST-0001",
+    "proof_kind": "provider",
+    "proof": {
+      "provider": "paystack",
+      "reference": "RP-TEST-0001"
+    },
+    "proof_payment_id": "test-payment-1",
+    "escrow_tx_hash": "0xabababababababababababababababababababababababababababababababab",
+    "release_tx_hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "settled_at": "2026-11-13T12:20:00Z",
+    "created_at": "2026-11-13T11:58:00Z",
+    "updated_at": "2026-11-13T12:00:00Z",
+    "payer_name": "Test Payer"
+  },
+  "fiatTradeView": {
+    "id": "ft-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
+    "quote_id": "fq-3f2b8c1e-5a6d-4e7f-8a9b-0c1d2e3f4a5b",
+    "solver_id": "solver-1111111111111111111111111111111111111111",
+    "direction": "offramp",
+    "chain": "eip155:84532",
+    "asset": "USDC",
+    "asset_minor_units": "100000000",
+    "fiat_currency": "NGN",
+    "fiat_minor_units": "15081152",
+    "rail": "ng.nip",
+    "rate": "1520.50",
+    "fee_minor_units": "47823",
+    "user_address": "0x2222222222222222222222222222222222222222",
+    "solver_address": "0x1111111111111111111111111111111111111111",
+    "state": "awaiting_fiat",
+    "deadline_at": "2026-11-13T12:15:00Z",
+    "resolution_note": "escrow funded by user",
+    "payee_sealed": {
+      "v": 1,
+      "alg": "ECIES-secp256k1-AES256GCM",
+      "epk": "0x04bcc35e8bd2cf66e0ecd6a7be0e08235285463644b2fb8a703f23cfd4d5e41f7ad76089deb6364c0ea2c71eba955fa755f91321a77b08d9aa5749226fb999aa31",
+      "iv": "0x33128acab27eedd81a00a58e",
+      "ct": "0x6ad2813291ce92d4d92882300373d2f6ba6bd54c8c47fcdf58ef47458b9f56ce16d5414eec14553eb7d492a9faa85d7c6a2113060f0a03b01a3cffd4cc2b1ca7ddd4622aa90d2b7d32e66ce815956c3c383daeb7256299fd746ee5c69d243cc800dc66e4c0d24233f9f5af564935ebe23e7a6838b75ee27ca13345240381f4eb1de6e61d00c363db8b4b36add9035500fa21912dad9d5990bed1dacc9817e531",
+      "tag": "0x39e7e2c056db0be4320600fa7be69179"
+    },
+    "payee_commitment": "0x26ebc7157b857f584f6d0da3585adb2925596ced588baf2489e8b9c6b412a099",
+    "payment_reference": "RP-TEST-0001",
+    "proof_kind": "provider",
+    "proof": {
+      "provider": "paystack",
+      "reference": "RP-TEST-0001"
+    },
+    "proof_payment_id": "test-payment-1",
+    "escrow_tx_hash": "0xabababababababababababababababababababababababababababababababab",
+    "release_tx_hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "settled_at": "2026-11-13T12:20:00Z",
+    "created_at": "2026-11-13T11:58:00Z",
+    "updated_at": "2026-11-13T12:00:00Z",
+    "pay_to": {
+      "rail": "ng.nip",
+      "bankCode": "058",
+      "account": "0000000000",
+      "name": "Test Merchant",
+      "bankName": "Test Bank"
+    }
+  },
+  "fiatQuotes": {
+    "quotes": [
+      {
+        "id": "fq-3f2b8c1e-5a6d-4e7f-8a9b-0c1d2e3f4a5b",
+        "solver_id": "solver-1111111111111111111111111111111111111111",
+        "direction": "offramp",
+        "chain": "eip155:84532",
+        "asset": "USDC",
+        "asset_decimals": 6,
+        "fiat_currency": "NGN",
+        "rail": "ng.nip",
+        "rate": "1520.50",
+        "fee_fixed": "10000",
+        "fee_bps": 25,
+        "min_fiat": "100000",
+        "max_fiat": "50000000",
+        "payment_window_secs": 900,
+        "kyc_tier_required": "none",
+        "expiry": "2026-11-20T00:00:00Z",
+        "paused": false,
+        "created_at": "2026-11-13T11:00:00Z",
+        "updated_at": "2026-11-13T11:00:00Z"
+      }
+    ]
+  },
+  "fiatPayeeKey": {
+    "publicKey": "0x04354199d31ea828e61af424cfc13155a6fb0874c2e60baec55416c63b871a913f4997ad28c988e06bbe6b0d5cf039e509cc87b2772731eb377d113db51f0015fe"
+  },
+  "error": {
+    "error": "TRADE_STATE",
+    "message": "cannot do that from refunded_to_funder",
+    "timestamp": 1763035200
+  },
+  "chains": {
+    "data": [
+      {
+        "chain_id": 84532,
+        "family": "evm",
+        "name": "base-sepolia",
+        "rpc_url": "https://sepolia.base.org",
+        "rpc_fallbacks": [],
+        "input_settler": "0xBE85Bb9ADb91D42fa148dE3a929BE1b9C46270A5",
+        "output_settler": "0x9EF00F018b4afDCAa89093EF3015E6D918a58003",
+        "oracle": "0x309eAdeDfB7b7Da32b8714a9AA950c8B02924a8e",
+        "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "giftcard_escrow": "0x60A422A7eDaF69B8292A8bCb399945Beb9F04379",
+        "giftcard_attested_escrow": "",
+        "merchant_bond": "0x236325d4131601B5Ec907722eB767756035329BA",
+        "fiat_escrow": "0x112a534104ac10E73D57f7C5a4C6469632392173",
+        "fiat_bond": "0x7aF85912a58678d93edEF660141FB49851D0F2a4",
+        "tokens": [
+          {
+            "symbol": "USDC",
+            "address": "0x73c83DAcc74bB8a704717AC09703b959E74b9705",
+            "decimals": 6
+          }
+        ]
+      }
+    ]
+  }
+}

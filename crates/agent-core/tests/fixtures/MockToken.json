@@ -1,0 +1,146 @@
+{
+ "_about": "MockToken: ABI and creation bytecode only, compiled from recoil-labs/recoil-pay-v2 attested-escrow/ for the on-chain lock tests. Regenerate with scripts/sync-from-monorepo.sh.",
+ "abi": [
+  {
+   "type": "function",
+   "name": "allowance",
+   "inputs": [
+    {
+     "name": "",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "",
+     "type": "address",
+     "internalType": "address"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "stateMutability": "view"
+  },
+  {
+   "type": "function",
+   "name": "approve",
+   "inputs": [
+    {
+     "name": "spender",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "bool",
+     "internalType": "bool"
+    }
+   ],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "balanceOf",
+   "inputs": [
+    {
+     "name": "",
+     "type": "address",
+     "internalType": "address"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "stateMutability": "view"
+  },
+  {
+   "type": "function",
+   "name": "mint",
+   "inputs": [
+    {
+     "name": "to",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "outputs": [],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "transfer",
+   "inputs": [
+    {
+     "name": "to",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "bool",
+     "internalType": "bool"
+    }
+   ],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "transferFrom",
+   "inputs": [
+    {
+     "name": "from",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "to",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "",
+     "type": "bool",
+     "internalType": "bool"
+    }
+   ],
+   "stateMutability": "nonpayable"
+  }
+ ],
+ "bytecode": {
+  "object": "0x608060405234801561000f575f80fd5b506103d58061001d5f395ff3fe608060405234801561000f575f80fd5b506004361061006f575f3560e01c806370a082311161004d57806370a08231146100c3578063a9059cbb146100f0578063dd62ed3e14610103575f80fd5b8063095ea7b31461007357806323b872dd1461009b57806340c10f19146100ae575b5f80fd5b61008661008136600461029a565b61012d565b60405190151581526020015b60405180910390f35b6100866100a93660046102c2565b61015a565b6100c16100bc36600461029a565b6101f5565b005b6100e26100d13660046102fb565b5f6020819052908152604090205481565b604051908152602001610092565b6100866100fe36600461029a565b610225565b6100e261011136600461031b565b600160209081525f928352604080842090915290825290205481565b335f9081526001602081815260408084206001600160a01b03871685529091529091208290555b92915050565b6001600160a01b0383165f90815260016020908152604080832033845290915281208054839190839061018e908490610379565b90915550506001600160a01b0384165f90815260208190526040812080548492906101ba908490610379565b90915550506001600160a01b0383165f90815260208190526040812080548492906101e690849061038c565b90915550600195945050505050565b6001600160a01b0382165f908152602081905260408120805483929061021c90849061038c565b90915550505050565b335f90815260208190526040812080548391908390610245908490610379565b90915550506001600160a01b0383165f908152602081905260408120805484929061027190849061038c565b909155506001949350505050565b80356001600160a01b0381168114610295575f80fd5b919050565b5f80604083850312156102ab575f80fd5b6102b48361027f565b946020939093013593505050565b5f805f606084860312156102d4575f80fd5b6102dd8461027f565b92506102eb6020850161027f565b9150604084013590509250925092565b5f6020828403121561030b575f80fd5b6103148261027f565b9392505050565b5f806040838503121561032c575f80fd5b6103358361027f565b91506103436020840161027f565b90509250929050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b818103818111156101545761015461034c565b808201808211156101545761015461034c56fea26469706673582212203065e3649e1a107b82db8f7e5ed5837f2b12b331a2cdde4375e8c506a5bcf51464736f6c63430008180033"
+ }
+}

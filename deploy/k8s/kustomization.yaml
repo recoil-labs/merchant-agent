@@ -1,0 +1,24 @@
+# The RecoilPay Merchant Agent on Kubernetes. See deploy/README.md.
+#
+#   kubectl apply -k deploy/k8s
+#
+# Before applying: put your config next to this file as merchant-agent.yaml
+# (written by `merchant-agent init --bind-all --secrets-dir
+# /run/merchant-agent/secrets`), and create the `merchant-agent-secrets`
+# Secret (the README has the command).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: merchant-agent
+resources:
+  - namespace.yaml
+  - statefulset.yaml
+  - service.yaml
+  - networkpolicy.yaml
+configMapGenerator:
+  - name: merchant-agent-config
+    files:
+      - merchant-agent.yaml
+images:
+  - name: merchant-agent
+    newName: ghcr.io/recoil-labs/merchant-agent
+    newTag: latest

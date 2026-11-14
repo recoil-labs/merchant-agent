@@ -1,0 +1,69 @@
+# The RecoilPay Merchant Agent on one machine. See deploy/README.md.
+#
+#   docker compose up -d          # start (after the README's first steps)
+#   docker compose logs -f        # follow
+#   docker compose exec agent merchant-agent status
+#
+# One agent per operator, always: the agent takes a lock and a lease on its
+# data volume, and a second one refuses to start.
+name: merchant-agent
+
+services:
+  agent:
+    image: ${MERCHANT_AGENT_IMAGE:-ghcr.io/recoil-labs/merchant-agent:latest}
+    build:
+      context: ..
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    restart: unless-stopped
+    command: ["run"]
+    # Sandbox secrets as environment variables, from .env. Production
+    # refuses env:// secrets: see the README's "Going to production".
+    env_file: .env
+    volumes:
+      - ./config/merchant-agent.yaml:/etc/merchant-agent/merchant-agent.yaml:ro
+      - data:/var/lib/merchant-agent
+    ports:
+      # The console and the health port, on this machine only. Reach the
+      # console from elsewhere through an SSH tunnel, never by publishing it.
+      - "127.0.0.1:8740:8740"
+      - "127.0.0.1:8741:8741"
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    stop_grace_period: 30s
+
+  # Writes the config, once: `docker compose run --rm -T init > config/merchant-agent.yaml`.
+  # Values come from .env. Needs no network and no secrets.
+  init:
+    profiles: [setup]
+    image: ${MERCHANT_AGENT_IMAGE:-ghcr.io/recoil-labs/merchant-agent:latest}
+    build:
+      context: ..
+    command:
+      - init
+      - --yes
+      - --stdout
+      - --bind-all
+      - --solver-id=${MERCHANT_AGENT_SOLVER_ID:?set MERCHANT_AGENT_SOLVER_ID in .env}
+      - --wallet=${MERCHANT_AGENT_WALLET:?set MERCHANT_AGENT_WALLET in .env}
+      - --aggregator-url=${MERCHANT_AGENT_AGGREGATOR_URL:-https://api.recoilpay.com}
+      - --data-dir=/var/lib/merchant-agent
+    network_mode: none
+    read_only: true
+
+volumes:
+  # The database and the audit log. Back this volume up.
+  data:

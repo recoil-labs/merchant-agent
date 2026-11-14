@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = ["crates/agent-core", "crates/merchant-agent"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94.1"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+merchant-agent-core = { path = "crates/agent-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml_ng = "0.10"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+secrecy = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
+regex = "1.11"
+rustix = { version = "1.1", features = ["process", "fs"] }
+# The agent's state: SQLite, bundled so a merchant needs no system library.
+rusqlite = { version = "0.42", features = ["bundled"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time", "net", "sync", "signal"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+anyhow = "1.0"
+# Cryptography: audited RustCrypto crates only, the versions the aggregator
+# uses, and no hand-written primitives (invariant 14).
+k256 = { version = "0.14", features = ["ecdh", "arithmetic"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+sha3 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+unicode-normalization = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+rand = "0.9"
+axum = { version = "0.8", features = ["form"] }
+# The local console: server-rendered HTML, no build step.
+maud = "0.27"
+# Console logins: argon2id passwords and TOTP. Audited crates only.
+argon2 = "0.5"
+totp-rs = { version = "5", features = ["otpauth"] }
+subtle = "2.6"
+rpassword = "7"
+# Alert email over SMTP, rustls only.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls", "hostname"] }
+tower = { version = "0.5", features = ["util"] }
+# On-chain reads (the independent lock check, invariant 3). The 1.x line the
+# aggregator uses; rustls only.
+alloy = { version = "1", default-features = false, features = ["std", "providers", "provider-http", "sol-types", "rpc-types-eth", "reqwest-rustls-tls"] }
+tempfile = "3"
+# Paystack mock server for the rail tests.
+wiremock = "0.6"
+proptest = "1"
+static_assertions = "1.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+float_arithmetic = "deny"
+dbg_macro = "deny"
+print_stderr = "warn"
+
+[profile.release]
+panic = "abort"
+lto = "thin"

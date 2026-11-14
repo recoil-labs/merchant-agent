@@ -1,0 +1,8 @@
+# Environment variables are read only through `secrets::EnvSource`, which
+# refuses to run in production. Anything else reading the environment would
+# be a way for a secret to bypass the secret backend (invariant 8).
+disallowed-methods = [
+	{ path = "std::env::var", reason = "read the environment only through secrets::EnvSource (sandbox only)" },
+	{ path = "std::env::var_os", reason = "read the environment only through secrets::EnvSource (sandbox only)" },
+	{ path = "std::env::vars", reason = "read the environment only through secrets::EnvSource (sandbox only)" },
+]

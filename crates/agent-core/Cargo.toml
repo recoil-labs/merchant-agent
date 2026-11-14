@@ -1,0 +1,61 @@
+[package]
+name = "merchant-agent-core"
+description = "The RecoilPay Merchant Agent's logic, as a library so all of it can be tested."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Cloud secret backends. Off by default so a merchant who uses files does not
+# compile, or audit, an SDK they never call.
+gcp = ["dep:base64"]
+aws = ["dep:aws-config", "dep:aws-sdk-secretsmanager"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+secrecy.workspace = true
+zeroize.workspace = true
+regex.workspace = true
+rustix.workspace = true
+tokio.workspace = true
+k256.workspace = true
+aes-gcm.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+hmac.workspace = true
+hex.workspace = true
+unicode-normalization.workspace = true
+reqwest.workspace = true
+alloy.workspace = true
+rusqlite.workspace = true
+axum.workspace = true
+maud.workspace = true
+argon2.workspace = true
+totp-rs.workspace = true
+subtle.workspace = true
+lettre.workspace = true
+chrono.workspace = true
+rand.workspace = true
+base64 = { version = "0.22", optional = true }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"], optional = true }
+aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+static_assertions.workspace = true
+proptest.workspace = true
+tower.workspace = true
+wiremock.workspace = true
+k256 = { workspace = true, features = ["ecdsa"] }
+
+[lints]
+workspace = true

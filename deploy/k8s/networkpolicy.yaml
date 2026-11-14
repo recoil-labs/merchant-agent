@@ -1,0 +1,61 @@
+# What the agent may talk to. Ingress: only the health port, from your
+# monitoring namespace (set its name below). Egress: DNS, and HTTPS to the
+# internet, where RecoilPay, your RPCs and your bank are.
+#
+# A NetworkPolicy matches addresses, not names, so "the aggregator, the RPCs
+# and the bank only" can be no tighter than "HTTPS out, nothing inside the
+# cluster or the cloud metadata service". To pin exact hosts, use your CNI's
+# FQDN policy (Cilium, Calico Enterprise) or an egress proxy, and list:
+# your aggregator.url host, each chains[].rpcs host, and api.paystack.co (or
+# your bank's API).
+#
+# Two things this blocks that you may need, each with a commented rule below:
+# - gcp-sm:// and aws-sm:// secrets get their credentials from the cloud
+#   metadata server (169.254.169.254, port 80);
+# - email alerts over SMTP use port 465 or 587, not 443.
+#
+# It is enforced only by a CNI that supports NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: merchant-agent
+spec:
+  podSelector:
+    matchLabels: {app: merchant-agent}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 8741}
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - {protocol: TCP, port: 443}
+    # Uncomment for gcp-sm:// or aws-sm:// secrets (workload identity):
+    # - to:
+    #     - ipBlock: {cidr: 169.254.169.254/32}
+    #   ports:
+    #     - {protocol: TCP, port: 80}
+    # Uncomment for email alerts (alerts.email):
+    # - to:
+    #     - ipBlock: {cidr: 0.0.0.0/0}
+    #   ports:
+    #     - {protocol: TCP, port: 465}
+    #     - {protocol: TCP, port: 587}

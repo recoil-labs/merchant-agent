@@ -1,0 +1,209 @@
+{
+  "_about": "Off-ramp pricing. protocolFee = floor(asset * protocolFeeBps / 10000) (AttestedEscrow.protocolFeeOn, ProtocolFee::split); convertible = asset - protocolFee; gross = floor(convertible * R * 10^2 / 10^(assetDecimals + s)) where the rate is R with s decimal places; fee = feeFixed + ceil(gross * feeBps / 10000); net = gross - fee; minFiat <= gross <= maxFiat; fee < gross. NGN minor exponent 2. Computed independently in Python integer arithmetic, not by either implementation. Read by the aggregator (recoil-core/aggregator/crates/types/tests/fiat_pricing_vector.rs: FiatQuote::price_offramp, ProtocolFee::split) and by the Merchant Agent (repo recoil-labs/merchant-agent, crates/agent-core/src/policy/pricing.rs), so both price a trade identically. Test values only.",
+  "cases": [
+    {
+      "name": "design \u00a72 worked example",
+      "assetMinorUnits": "100000000",
+      "protocolFeeBps": 50,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "500000",
+      "convertible": "99500000",
+      "expect": {
+        "gross": "15128975",
+        "fee": "47823",
+        "net": "15081152"
+      }
+    },
+    {
+      "name": "no protocol fee",
+      "assetMinorUnits": "100000000",
+      "protocolFeeBps": 0,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "0",
+      "convertible": "100000000",
+      "expect": {
+        "gross": "15205000",
+        "fee": "48013",
+        "net": "15156987"
+      }
+    },
+    {
+      "name": "whole-number rate",
+      "assetMinorUnits": "25000000",
+      "protocolFeeBps": 50,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1500",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "125000",
+      "convertible": "24875000",
+      "expect": {
+        "gross": "3731250",
+        "fee": "19329",
+        "net": "3711921"
+      }
+    },
+    {
+      "name": "four decimal places in the rate",
+      "assetMinorUnits": "33333333",
+      "protocolFeeBps": 10,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1498.7654",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "33333",
+      "convertible": "33300000",
+      "expect": {
+        "gross": "4990888",
+        "fee": "22478",
+        "net": "4968410"
+      }
+    },
+    {
+      "name": "proportional fee rounds up",
+      "assetMinorUnits": "1000001",
+      "protocolFeeBps": 0,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "0",
+        "feeBps": 1,
+        "minFiat": "1",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "0",
+      "convertible": "1000001",
+      "expect": {
+        "gross": "152050",
+        "fee": "16",
+        "net": "152034"
+      }
+    },
+    {
+      "name": "protocol fee rounds down",
+      "assetMinorUnits": "999",
+      "protocolFeeBps": 100,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1000000",
+        "feeFixed": "0",
+        "feeBps": 0,
+        "minFiat": "1",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "9",
+      "convertible": "990",
+      "expect": {
+        "gross": "99000",
+        "fee": "0",
+        "net": "99000"
+      }
+    },
+    {
+      "name": "large cash-out",
+      "assetMinorUnits": "30000000000",
+      "protocolFeeBps": 50,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "5000000000000"
+      },
+      "protocolFee": "150000000",
+      "convertible": "29850000000",
+      "expect": {
+        "gross": "4538692500",
+        "fee": "11356732",
+        "net": "4527335768"
+      }
+    },
+    {
+      "name": "below the size band",
+      "assetMinorUnits": "50000",
+      "protocolFeeBps": 50,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "250",
+      "convertible": "49750",
+      "expect": {
+        "error": "out_of_band"
+      }
+    },
+    {
+      "name": "above the size band",
+      "assetMinorUnits": "1000000000",
+      "protocolFeeBps": 50,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "10000",
+        "feeBps": 25,
+        "minFiat": "100000",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "5000000",
+      "convertible": "995000000",
+      "expect": {
+        "error": "out_of_band"
+      }
+    },
+    {
+      "name": "fees take everything",
+      "assetMinorUnits": "100000",
+      "protocolFeeBps": 0,
+      "quote": {
+        "assetDecimals": 6,
+        "fiatCurrency": "NGN",
+        "rate": "1520.50",
+        "feeFixed": "200000",
+        "feeBps": 25,
+        "minFiat": "1",
+        "maxFiat": "50000000"
+      },
+      "protocolFee": "0",
+      "convertible": "100000",
+      "expect": {
+        "error": "nothing_left"
+      }
+    }
+  ]
+}

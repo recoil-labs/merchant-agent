@@ -1,0 +1,8 @@
+# Only the sources reach the build.
+target
+merchant-agent-data
+deploy
+docs
+**/*.yaml
+!config.example.yaml
+.git

@@ -1,0 +1,16 @@
+# cargo audit: the same exceptions as deny.toml (reasons there), plus two
+# that cargo deny doesn't report because it checks unmaintained and unsound
+# crates only among the workspace's direct dependencies.
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0387", # crypto-bigint 0.5: only alloy's copy, which never touches a secret
+  "RUSTSEC-2024-0436", # paste: a compile-time macro in alloy
+  "RUSTSEC-2024-0449", # unsafe-libyaml: parses only the operator's own config file
+  # lru 0.16 (unsound pop() if a value's Drop panics): pinned by alloy 1.x's
+  # provider; the fix needs alloy 2. Cached values never panic on drop, and
+  # release builds abort on any panic. Drop when alloy moves.
+  "RUSTSEC-2026-0253",
+  # derivative (unmaintained): listed in Cargo.lock under ark-ff 0.3/0.4,
+  # but no build of the agent compiles it (cargo tree finds no path).
+  "RUSTSEC-2024-0388",
+]

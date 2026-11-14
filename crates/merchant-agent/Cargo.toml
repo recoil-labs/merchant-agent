@@ -1,0 +1,31 @@
+[package]
+name = "merchant-agent"
+description = "The RecoilPay Merchant Agent: pays out naira cash-outs through the merchant's own bank rails."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[features]
+gcp = ["merchant-agent-core/gcp"]
+aws = ["merchant-agent-core/aws"]
+
+[dependencies]
+merchant-agent-core.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+rpassword.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+rustix.workspace = true
+
+[lints]
+workspace = true

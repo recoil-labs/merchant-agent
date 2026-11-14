@@ -1,0 +1,137 @@
+# RecoilPay Merchant Agent config.
+#
+# THE EXAMPLE CONFIG. Generate your own with `merchant-agent init`; this file
+# is the same output with placeholder ids.
+#
+# Going to production means changing, at least:
+#   mode: production
+#   aggregator.url        -> https://… (RecoilPay's production URL)
+#   every env:// secret   -> gcp-sm://, aws-sm:// or file:/// (0600, owned by the agent's user)
+#   chains                -> your production chain, escrow and USDC, with your own https RPCs
+#   rail.kind             -> paystack, manual or template (simulated is refused)
+#   policy.name_match     -> strict or token_set
+#   limits                -> your real limits
+# then `merchant-agent doctor` must pass.
+#
+# Written by `merchant-agent init` in SANDBOX mode: Base Sepolia testnet,
+# the simulated bank, and low limits. No real money moves.
+#
+# Secrets are never written in this file. Each secret field holds a
+# reference to where the secret lives:
+#   gcp-sm://projects/<p>/secrets/<s>/versions/<v>   GCP Secret Manager
+#   aws-sm://<name or ARN>                           AWS Secrets Manager
+#   file:///absolute/path                            a file, mode 0600, owned by the agent's user
+#   env://NAME                                       an environment variable (sandbox only)
+#
+# Check everything with:  merchant-agent doctor
+
+config_version: 1
+
+# sandbox | production. Production needs real secrets (not env://), a real
+# bank rail, https everywhere and a passing `merchant-agent doctor`.
+mode: sandbox
+
+operator:
+  # Your operator id in RecoilPay.
+  solver_id: "solver-0000000000000000000000000000000000000000"
+  # Your registered wallet. Every escrow lock you are paid from names this
+  # address. It is pinned here and never taken from the aggregator.
+  wallet: "0x0000000000000000000000000000000000000000"
+
+aggregator:
+  url: "http://127.0.0.1:4000"
+  api_key: env://MERCHANT_AGENT_API_KEY
+  # How often to look for new cash-outs, in seconds.
+  poll_secs: 5
+  request_timeout_secs: 10
+
+payee:
+  # Opens the bank details customers seal to you. Export it from the
+  # portal (Payouts) and set key_form: private_key. Or, if you signed the
+  # payee-key message yourself, store the signature and set
+  # key_form: signature.
+  private_key: env://MERCHANT_AGENT_PAYEE_KEY
+  key_form: private_key
+  # Lets the agent recognise the same bank account across trades (for the
+  # per-payee limit) without storing the account number.
+  tag_pepper: env://MERCHANT_AGENT_PAYEE_TAG_PEPPER
+
+chains:
+  - caip2: "eip155:84532"
+    name: base-sepolia
+    # Pinned addresses. At start-up the agent checks them against
+    # RecoilPay's registry and refuses to pay if they differ.
+    escrow: "0x112a534104ac10E73D57f7C5a4C6469632392173"
+    usdc: "0x73c83DAcc74bB8a704717AC09703b959E74b9705"
+    usdc_decimals: 6
+    # Your own RPC endpoints. Use `secret:` instead of `url:` for a URL
+    # that carries an API key.
+    rpcs:
+      - url: "https://sepolia.base.org"
+    # Blocks a lock must be buried under before the agent pays.
+    confirmations: 3
+    require_rpc_agreement: false
+
+rail:
+  # simulated (sandbox only) | manual | paystack | template
+  kind: simulated
+
+# Local limits, enforced by the agent whatever RecoilPay says. Amounts are
+# in kobo (₦1 = 100 kobo), written as strings. There are no defaults: every
+# limit must be set.
+limits:
+  currency: NGN
+  per_trade_minor: "5000000"            # ₦50,000.00
+  per_day_minor: "50000000"             # ₦500,000.00
+  per_payee_per_day_minor: "10000000"   # ₦100,000.00
+  velocity_max_payouts: 20              # at most 20 payouts ...
+  velocity_window_secs: 3600            # ... per hour
+  min_float_minor: "0"                  # never pay below this balance
+
+policy:
+  # Don't start a payout with less than this many seconds left in the
+  # 15-minute window. A late payout can be refunded to the customer AND
+  # paid by you.
+  start_margin_secs: 180
+  # If the bank still says "pending" with this many seconds left, report
+  # the payment with the bank's reference anyway.
+  report_margin_secs: 120
+  max_clock_skew_secs: 5
+  # How far a quote's rate may be from your reference rate (below), in
+  # basis points.
+  max_rate_deviation_bps: 300
+  # How far a trade's naira may differ from the agent's own recomputation
+  # from your published offer, in basis points. 0 means exact.
+  amount_tolerance_bps: 0
+  # strict | token_set | off (sandbox only)
+  name_match: token_set
+  two_person:
+    enabled: false
+    # approve_over_minor: "20000000"
+
+# Your reference rates, NGN per USDC, by rail. A trade on an offer whose
+# rate is further from this than policy.max_rate_deviation_bps is held.
+# Without one, that check is off (doctor warns in production).
+pricing:
+  reference_rates:
+    ng.nip: "1500.00"
+
+# Payees on a deny-list are held for review. Make the list with
+# `merchant-agent screening hash`, then uncomment:
+# screening:
+#   deny_list: /etc/merchant-agent/deny-list.txt
+
+server:
+  # The local console and health endpoints. Keep them on 127.0.0.1.
+  console_bind: "127.0.0.1:8740"
+  health_bind: "127.0.0.1:8741"
+  bind_public: false
+
+storage:
+  # The agent's database and audit log. Back this directory up.
+  data_dir: "/var/lib/merchant-agent"
+
+logging:
+  level: info
+  # json | pretty
+  format: json
