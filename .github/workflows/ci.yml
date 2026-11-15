@@ -143,9 +143,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: the tagged commit is on main (reviewed and merged)
+        # The checkout above already fetched every branch (fetch-depth: 0),
+        # so compare with origin/main locally: with persist-credentials off,
+        # a second fetch from this private repo has no credentials.
         run: |
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD \
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "tag $GITHUB_REF_NAME points at a commit that is not on main"; exit 1; }
       - name: the tag matches the crate version
         run: |
