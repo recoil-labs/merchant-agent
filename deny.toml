@@ -22,6 +22,12 @@ ignore = [
   # operator's own config file, written by `init` and readable only by the
   # operator; never input from RecoilPay, a customer or the network.
   { id = "RUSTSEC-2024-0449", reason = "parses only the operator's own config file" },
+  # chrono: declared unmaintained (no known vulnerability), with no safe
+  # upgrade. The agent uses it only to parse and compare the timestamps in
+  # RecoilPay's trade JSON and to stamp its own records; alloy and the
+  # aggregator's types use it too. Replace with jiff or time in a change of
+  # its own, then drop this.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, not vulnerable; timestamps only" },
 ]
 
 [licenses]
