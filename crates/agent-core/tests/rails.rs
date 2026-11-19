@@ -8,7 +8,8 @@
 mod common;
 use common::*;
 
-use merchant_agent_core::engine::Revealed;
+use merchant_agent_core::aggregator::types::PayerName;
+use merchant_agent_core::engine::{EngineConfig, Revealed};
 use merchant_agent_core::machine::PersonAction;
 use merchant_agent_core::money::Minor;
 use merchant_agent_core::rail::manual::ManualRail;
@@ -181,6 +182,90 @@ async fn an_account_the_bank_does_not_know_is_held_and_cannot_be_approved() {
 	let end = run(&world, |s| matches!(s, AgentState::Held(_))).await;
 	assert_eq!(end, AgentState::Held(HoldReason::AccountNotFound));
 	assert!(!HoldReason::AccountNotFound.approvable());
+}
+
+// ── sellers RecoilPay verified ───────────────────────────────────────────
+
+/// The trade carries the seller's verified legal name, as on an offer that
+/// pays only verified sellers. The bank's name for the account is "TEST
+/// PAYEE".
+fn verified_seller(world: &World, name: &str) {
+	world
+		.platform
+		.edit(|t| t.payer_name = Some(PayerName::new(name.into())));
+}
+
+#[tokio::test]
+async fn an_account_in_the_sellers_verified_name_is_paid() {
+	let world = World::new();
+	verified_seller(&world, "PAYEE TEST");
+	assert!(reported(&run(&world, reported).await));
+	assert_eq!(world.bank.inner.settled_payments().len(), 1);
+}
+
+#[tokio::test]
+async fn an_account_in_another_name_than_the_verified_one_is_held() {
+	let world = World::new();
+	// The customer typed the account's own name, so the usual check passes;
+	// it's the verified seller who isn't the account holder.
+	verified_seller(&world, "OKORO UCHENNA");
+	let end = run(&world, |s| matches!(s, AgentState::Held(_))).await;
+	assert_eq!(end, AgentState::Held(HoldReason::VerifiedNameMismatch));
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn a_partly_matching_verified_name_is_held_for_a_person() {
+	let world = World::new();
+	// A middle name the bank doesn't have: plausibly the same person, so a
+	// person checks rather than the agent paying.
+	verified_seller(&world, "TEST PAYEE JOHN");
+	let end = run(&world, |s| matches!(s, AgentState::Held(_))).await;
+	assert_eq!(end, AgentState::Held(HoldReason::VerifiedNameMismatch));
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn a_verified_name_mismatch_approved_by_a_person_is_paid() {
+	let world = World::new();
+	verified_seller(&world, "TEST PAYEE JOHN");
+	let dir = tempfile::tempdir().unwrap();
+	let agent = world.agent(dir.path()).unwrap();
+	tick_until(&agent, |s| matches!(s, AgentState::Held(_))).await;
+	agent
+		.person(TRADE_ID, PersonAction::Approve, "ops")
+		.await
+		.unwrap();
+	assert!(reported(&tick_until(&agent, reported).await));
+	assert_eq!(world.bank.inner.settled_payments().len(), 1);
+	assert_books(&world);
+}
+
+#[tokio::test]
+async fn a_required_but_unavailable_verified_name_is_held_and_cannot_be_approved() {
+	let world = World::new();
+	verified_seller(&world, "");
+	let end = run(&world, |s| matches!(s, AgentState::Held(_))).await;
+	assert_eq!(end, AgentState::Held(HoldReason::VerifiedNameUnavailable));
+	assert!(!HoldReason::VerifiedNameUnavailable.approvable());
+	assert!(world.bank.inner.payments().is_empty());
+}
+
+#[tokio::test]
+async fn without_the_check_a_verified_name_is_not_compared() {
+	let world = World::new();
+	verified_seller(&world, "OKORO UCHENNA");
+	let dir = tempfile::tempdir().unwrap();
+	let agent = world
+		.agent_with(
+			dir.path(),
+			EngineConfig {
+				require_verified_name_match: false,
+				..World::cfg()
+			},
+		)
+		.unwrap();
+	assert!(reported(&tick_until(&agent, reported).await));
 }
 
 // ── float and the automatic pause ────────────────────────────────────────

@@ -18,7 +18,7 @@ check=0
 if [ "${1:-}" = "--check" ]; then check=1; shift; fi
 repo="${1:?usage: $0 [--check] path/to/recoil-pay-v2}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
-vectors=(fiat-payee fiat-lock fiat-pricing merchant-agent-api)
+vectors=(fiat-payee fiat-lock fiat-pricing merchant-agent-api seller-names)
 
 [ -d "$repo/test-vectors" ] || { echo "$repo has no test-vectors/" >&2; exit 1; }
 

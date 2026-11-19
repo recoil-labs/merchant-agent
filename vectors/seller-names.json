@@ -1,0 +1,35 @@
+{
+  "_about": "Does a name match a seller's verified legal name? `verified` is the name from the ID authority (Dojah), `typed` the name to check: what the seller typed as the account holder, or the bank's name for the account. `expect` is match, unsure or mismatch. Read by oif-types (names_match), the intent kit (namesMatch), the operator portal and the Merchant Agent. Rules: seller-kyc-design.md §2.4.",
+  "titles": ["MR", "MRS", "MS", "MISS", "MASTER", "DR", "PROF", "ENGR", "ENG", "CHIEF", "ALHAJI", "ALHAJA", "HAJIA", "PASTOR", "REV", "BARR", "SIR", "MADAM", "HON"],
+  "cases": [
+    { "why": "same words, bank order", "verified": "OKORO UCHENNA JOHN", "typed": "John Uchenna Okoro", "expect": "match" },
+    { "why": "case only", "verified": "OKORO UCHENNA JOHN", "typed": "okoro uchenna john", "expect": "match" },
+    { "why": "accents are stripped", "verified": "ADEBAYO OLAMIDE", "typed": "Adébáyọ̀ Ọlámídé", "expect": "match" },
+    { "why": "punctuation separates words", "verified": "O'BRIEN-SMITH ANN", "typed": "Ann O Brien Smith", "expect": "match" },
+    { "why": "a title is dropped", "verified": "OKORO UCHENNA", "typed": "Mr. Uchenna Okoro", "expect": "match" },
+    { "why": "a Nigerian honorific is dropped", "verified": "BELLO AISHA", "typed": "Alhaja Aisha Bello", "expect": "match" },
+    { "why": "a title on the verified side is dropped too", "verified": "CHIEF NWOSU EMEKA", "typed": "Emeka Nwosu", "expect": "match" },
+    { "why": "repeated words count", "verified": "NWOSU CHIDI CHIDI", "typed": "Chidi Nwosu Chidi", "expect": "match" },
+    { "why": "extra spaces and a trailing dot", "verified": "OKORO  UCHENNA ", "typed": " uchenna okoro.", "expect": "match" },
+
+    { "why": "missing middle name", "verified": "OKORO UCHENNA JOHN", "typed": "Uchenna Okoro", "expect": "unsure" },
+    { "why": "extra middle name", "verified": "OKORO UCHENNA", "typed": "Uchenna John Okoro", "expect": "unsure" },
+    { "why": "initials for first names", "verified": "OKORO UCHENNA JOHN", "typed": "U. J. Okoro", "expect": "unsure" },
+    { "why": "one initial, same length: never a match", "verified": "OKORO UCHENNA JOHN", "typed": "Okoro U. John", "expect": "unsure" },
+    { "why": "an initial and a surname", "verified": "OKORO UCHENNA", "typed": "U. Okoro", "expect": "unsure" },
+    { "why": "a repeated surname on one side", "verified": "BELLO AISHA", "typed": "Bello Aisha Bello", "expect": "unsure" },
+
+    { "why": "different surname", "verified": "OKORO UCHENNA JOHN", "typed": "Okafor Uchenna John", "expect": "mismatch" },
+    { "why": "a different person", "verified": "OKORO UCHENNA", "typed": "Chinedu Eze", "expect": "mismatch" },
+    { "why": "one shared word is not enough", "verified": "OKORO UCHENNA", "typed": "Okoro", "expect": "mismatch" },
+    { "why": "one shared first name is not enough", "verified": "OKORO UCHENNA JOHN", "typed": "Uchenna Eze", "expect": "mismatch" },
+    { "why": "initials alone are not enough", "verified": "OKORO UCHENNA", "typed": "U O", "expect": "mismatch" },
+    { "why": "an initial that fits no word", "verified": "OKORO UCHENNA", "typed": "K. Okoro", "expect": "mismatch" },
+    { "why": "a name split differently (known limit: the agent holds it for a person)", "verified": "ADEBAYO OLA", "typed": "Ade Bayo Ola", "expect": "mismatch" },
+    { "why": "nothing typed", "verified": "OKORO UCHENNA", "typed": "", "expect": "mismatch" },
+    { "why": "only punctuation typed", "verified": "OKORO UCHENNA", "typed": " .- ", "expect": "mismatch" },
+    { "why": "only a title typed", "verified": "OKORO UCHENNA", "typed": "Mr.", "expect": "mismatch" },
+    { "why": "no verified name", "verified": "", "typed": "Uchenna Okoro", "expect": "mismatch" },
+    { "why": "a company name", "verified": "OKORO UCHENNA", "typed": "Okoro Uchenna Ventures Ltd", "expect": "unsure" }
+  ]
+}

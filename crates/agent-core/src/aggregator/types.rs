@@ -137,9 +137,43 @@ pub enum ProofKind {
 	Zktls,
 }
 
+/// The verified legal name on a trade (`payer_name`), as personal data.
+///
+/// Shared, not copied, when a trade is cloned, and redacted in `Debug`, so a
+/// trade can still be cloned and logged with `?trade` without the name ever
+/// being written anywhere. Read it with [`PayerName::name`].
+#[derive(Clone)]
+pub struct PayerName(std::sync::Arc<crate::pii::VerifiedName>);
+
+impl PayerName {
+	pub fn new(value: String) -> Self {
+		Self(std::sync::Arc::new(crate::pii::VerifiedName::new(value)))
+	}
+
+	pub fn name(&self) -> &crate::pii::VerifiedName {
+		&self.0
+	}
+}
+
+impl fmt::Debug for PayerName {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("PayerName(<redacted>)")
+	}
+}
+
+impl<'de> Deserialize<'de> for PayerName {
+	fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+		let raw = zeroize::Zeroizing::new(String::deserialize(d)?);
+		Ok(Self::new(String::clone(&raw)))
+	}
+}
+
 /// One fiat trade, from either the operator's list (`OwnFiatTrade`, which
 /// adds `payer_name`) or the single-trade read (`FiatTradeView`, which adds
-/// `pay_to`). Both extras are on-ramp only and discarded.
+/// `pay_to`). `pay_to` is on-ramp only and discarded. `payer_name` is the
+/// seller's verified legal name on a cash-out that required a verified
+/// seller (`""` when it can't be shown); on-ramp it is the payer's, which
+/// this agent never uses.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Trade {
@@ -176,7 +210,7 @@ pub struct Trade {
 	pub created_at: DateTime<Utc>,
 	pub updated_at: DateTime<Utc>,
 	#[serde(default)]
-	pub payer_name: Option<Discarded>,
+	pub payer_name: Option<PayerName>,
 	#[serde(default)]
 	pub pay_to: Option<Discarded>,
 }

@@ -11,6 +11,7 @@ bytes, so none of them can change a shared rule alone.
 | `fiat-lock.json` | the escrow lock id (`src/chain/lock_id.rs`) |
 | `fiat-pricing.json` | how a cash-out's naira amount is computed (`src/policy/pricing.rs`) |
 | `merchant-agent-api.json` | the shapes of the aggregator routes the agent calls (`src/aggregator/`) |
+| `seller-names.json` | whether the bank's name for an account matches a seller's verified name (`src/rail/names.rs`) |
 
 Never edit them here. To update, from a checkout of both repositories:
 

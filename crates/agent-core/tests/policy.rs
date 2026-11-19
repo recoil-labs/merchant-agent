@@ -774,6 +774,14 @@ fn every_hold_reason_has_a_test() {
 			HoldReason::InsufficientFloat,
 			"rails::insufficient_float_holds_the_trade_and_pauses_new_offers",
 		),
+		(
+			HoldReason::VerifiedNameMismatch,
+			"rails::an_account_in_another_name_than_the_verified_one_is_held",
+		),
+		(
+			HoldReason::VerifiedNameUnavailable,
+			"rails::a_required_but_unavailable_verified_name_is_held_and_cannot_be_approved",
+		),
 	];
 	for r in HoldReason::ALL {
 		assert!(covered.iter().any(|(c, _)| *c == r), "{r:?} has no test");

@@ -398,6 +398,12 @@ fn invariant_7_no_account_number_or_name_in_the_database_logs_or_alerts() {
 			.build()
 			.unwrap()
 			.block_on(async {
+				// A seller RecoilPay verified: the trade carries their name too.
+				world.platform.edit(|t| {
+					t.payer_name = Some(merchant_agent_core::aggregator::types::PayerName::new(
+						VERIFIED.into(),
+					))
+				});
 				let agent = world.agent(dir.path()).unwrap();
 				tick_until(&agent, reported).await;
 				world.platform.edit(|t| t.state = TradeState::Disputed);
@@ -425,7 +431,15 @@ fn invariant_7_no_account_number_or_name_in_the_database_logs_or_alerts() {
 	);
 	assert!(!haystack.contains(ACCOUNT), "the account number leaked");
 	assert!(!haystack.contains(NAME), "the account holder's name leaked");
+	assert!(
+		!haystack.contains(VERIFIED),
+		"the seller's verified name leaked"
+	);
 }
+
+/// A verified name in the same words as the bank's, in another order, so
+/// the payout goes through and every step of it is searched.
+const VERIFIED: &str = "PAYEE TEST";
 
 struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
 

@@ -105,6 +105,10 @@ policy:
   amount_tolerance_bps: 0
   # strict | token_set | off (sandbox only)
   name_match: token_set
+  # On an offer that pays only verified sellers, the account must be in the
+  # seller's verified name (RecoilPay's shared rule), or the payout is held.
+  # false is for sandbox only.
+  require_verified_name_match: true
   two_person:
     enabled: false
     # approve_over_minor: "20000000"
