@@ -44,7 +44,11 @@ impl FakeAggregator {
 		let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
 		let mut chains = fixture["chains"].clone();
 		chains["data"][0]["fiat_escrow"] = json!(self.escrow);
-		let quotes = fixture["fiatQuotes"].clone();
+		let mut quotes = fixture["fiatQuotes"].clone();
+		// The shared fixture's offer expires on a fixed date, and `resume`
+		// republishes only offers still live. Keep it live, whatever today is.
+		quotes["quotes"][0]["expiry"] = json!((chrono::Utc::now() + chrono::Duration::days(1))
+			.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
 		let put_quotes = quotes.clone();
 		let (payee, accepted) = (self.payee_key, self.key_accepted);
 		let delay = self.trades_delay;
