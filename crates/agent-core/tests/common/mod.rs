@@ -297,6 +297,7 @@ impl World {
 			status_errors_before_unknown: 3,
 			max_steps: 16,
 			name_match: merchant_agent_core::config::NameMatch::TokenSet,
+			require_verified_name_match: true,
 			min_float: merchant_agent_core::money::Minor(0),
 			limits: None,
 			two_person: merchant_agent_core::config::TwoPerson {
@@ -313,6 +314,20 @@ impl World {
 		let holder = format!("test-{}", NEXT_HOLDER.fetch_add(1, Ordering::SeqCst));
 		let store = Store::open(dir, &holder)?;
 		self.agent_on(store)
+	}
+
+	/// An agent with its own engine settings.
+	pub fn agent_with(&self, dir: &Path, cfg: EngineConfig) -> Result<Agent, EngineError> {
+		let holder = format!("test-{}", NEXT_HOLDER.fetch_add(1, Ordering::SeqCst));
+		Engine::start(
+			Arc::new(Store::open(dir, &holder)?),
+			self.platform.clone(),
+			self.locks.clone(),
+			checks(),
+			self.bank.clone(),
+			self.clock.clone(),
+			cfg,
+		)
 	}
 
 	pub fn agent_on(&self, store: Store) -> Result<Agent, EngineError> {

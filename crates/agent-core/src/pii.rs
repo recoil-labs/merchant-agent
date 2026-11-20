@@ -48,6 +48,29 @@ impl HolderName {
 	}
 }
 
+/// A seller's verified legal name, sent by the aggregator on a cash-out that
+/// required a verified seller (`payer_name`). Personal data like the rest:
+/// compared with the bank's name for the account, then dropped. Never
+/// logged, alerted, audited or stored.
+pub struct VerifiedName(Zeroizing<String>);
+
+impl VerifiedName {
+	pub fn new(value: String) -> Self {
+		Self(Zeroizing::new(value))
+	}
+
+	/// The value itself. Only for the name check against the bank's lookup.
+	pub fn expose(&self) -> &str {
+		&self.0
+	}
+
+	/// The aggregator sends `""` when the trade required a verified seller
+	/// but the name can't be shown: never pay then.
+	pub fn is_unavailable(&self) -> bool {
+		self.0.trim().is_empty()
+	}
+}
+
 /// Stars for everything but the last four characters. Short values are
 /// starred entirely: four characters of a five-character value would reveal
 /// almost all of it.
@@ -68,6 +91,7 @@ mod tests {
 
 	assert_not_impl_any!(AccountNumber: Debug, Display, Clone, serde::Serialize);
 	assert_not_impl_any!(HolderName: Debug, Display, Clone, serde::Serialize);
+	assert_not_impl_any!(VerifiedName: Debug, Display, Clone, serde::Serialize);
 
 	#[test]
 	fn masks_all_but_the_last_four() {

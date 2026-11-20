@@ -56,10 +56,16 @@ pub enum HoldReason {
 	Paused,
 	AccountNotFound,
 	InsufficientFloat,
+	/// The bank's name for the account isn't the seller's verified name, on
+	/// an offer that pays only verified sellers.
+	VerifiedNameMismatch,
+	/// The trade required a verified seller, but the aggregator couldn't show
+	/// the name to check against.
+	VerifiedNameUnavailable,
 }
 
 impl HoldReason {
-	pub const ALL: [Self; 18] = [
+	pub const ALL: [Self; 20] = [
 		Self::LockMismatch,
 		Self::LockClosed,
 		Self::PayeeUnreadable,
@@ -78,6 +84,8 @@ impl HoldReason {
 		Self::Paused,
 		Self::AccountNotFound,
 		Self::InsufficientFloat,
+		Self::VerifiedNameMismatch,
+		Self::VerifiedNameUnavailable,
 	];
 
 	pub fn code(&self) -> &'static str {
@@ -100,6 +108,8 @@ impl HoldReason {
 			Self::Paused => "paused",
 			Self::AccountNotFound => "account_not_found",
 			Self::InsufficientFloat => "insufficient_float",
+			Self::VerifiedNameMismatch => "verified_name_mismatch",
+			Self::VerifiedNameUnavailable => "verified_name_unavailable",
 		}
 	}
 
@@ -127,6 +137,8 @@ impl HoldReason {
 			Self::Paused => "Payouts are paused. Resume them from the console or with `merchant-agent resume`.",
 			Self::AccountNotFound => "Your bank says the customer's account does not exist.",
 			Self::InsufficientFloat => "Your payout account would drop below its minimum balance. New offers are paused until you top it up.",
+			Self::VerifiedNameMismatch => "The account isn't in the seller's verified name, or only partly matches it. This offer pays only an account in the seller's own name: check before you approve.",
+			Self::VerifiedNameUnavailable => "This trade needs a verified seller, but RecoilPay couldn't show the seller's verified name. Don't pay; contact RecoilPay support.",
 		}
 	}
 
@@ -140,6 +152,7 @@ impl HoldReason {
 				| Self::PayeeUnreadable
 				| Self::TradeChanged
 				| Self::AccountNotFound
+				| Self::VerifiedNameUnavailable
 		)
 	}
 

@@ -32,6 +32,7 @@ Read the reason on the card. Then:
 | The trade names an offer the agent never saw | Did you publish it from somewhere else? | Approve only if you did publish it. |
 | The naira amount doesn't match | Usually a sign of tampering, or an offer changed under the trade | Don't approve unless you can explain it. |
 | The account name at the bank doesn't match | Compare the names (the card shows the account's last four digits) | Approve if it's plainly the same person, otherwise leave it. |
+| The account isn't in the seller's verified name, or only partly matches it | This offer pays only verified sellers, and only to an account in their own name. Look the account up in your bank and compare it with the seller's verified name on the RecoilPay portal's payout desk (the agent never stores or shows it) | Approve only if it's plainly the seller's own account (a missing middle name, initials). Otherwise leave it: it expires, and the seller is refunded. |
 | The payee matched your screening list | Your compliance process | Approve, or leave it. |
 | Too close to the deadline | Is there still time to pay safely? | Usually leave it: it expires, and the customer is refunded. |
 | Your payout account would drop below its minimum | [The float is low](low-float.md) | Top up, then approve. |
@@ -46,11 +47,13 @@ again does nothing.
 
 The lock doesn't match, the lock was already closed, the bank details can't be
 opened or don't match their commitment, the trade changed after the agent
-saw it, or your bank says the account doesn't exist. **These can't be
+saw it, your bank says the account doesn't exist, or the trade needed a verified
+seller but RecoilPay couldn't show the seller's verified name. **These can't be
 approved:** the customer's money isn't there for you, or the destination is
 wrong. Leave the trade. It expires, and RecoilPay refunds the customer. If
-the lock doesn't match, tell RecoilPay: the trade's data and the chain
-disagree.
+the lock doesn't match, or the verified name was unavailable, tell RecoilPay:
+the trade's data and the chain disagree, or RecoilPay's identity records
+couldn't be read.
 
 ### Needs a person: the bank can't say, or said it failed
 

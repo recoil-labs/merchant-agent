@@ -197,7 +197,15 @@ struct RawPolicy {
 	max_rate_deviation_bps: u32,
 	amount_tolerance_bps: u32,
 	name_match: NameMatch,
+	/// On a trade that carries the seller's verified name, the bank's name
+	/// for the account must match it. On unless set; off is sandbox only.
+	#[serde(default = "on")]
+	require_verified_name_match: bool,
 	two_person: RawTwoPerson,
+}
+
+fn on() -> bool {
+	true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,6 +222,10 @@ pub struct Policy {
 	/// recomputation. 0 (exact) unless you have a reason.
 	pub amount_tolerance_bps: u32,
 	pub name_match: NameMatch,
+	/// When a trade carries the seller's verified name (an offer that pays
+	/// only verified sellers), the bank's name for the account must match it
+	/// under RecoilPay's shared rule, or the trade is held.
+	pub require_verified_name_match: bool,
 	pub two_person: TwoPerson,
 }
 
@@ -608,6 +620,9 @@ impl RawConfig {
 		if prod && pol.name_match == NameMatch::Off {
 			p.push("policy.name_match off is for sandbox only".into());
 		}
+		if prod && !pol.require_verified_name_match {
+			p.push("policy.require_verified_name_match off is for sandbox only".into());
+		}
 		if pol.start_margin_secs < 30 {
 			p.push("policy.start_margin_secs must be at least 30".into());
 		}
@@ -664,6 +679,7 @@ impl RawConfig {
 			max_rate_deviation_bps: pol.max_rate_deviation_bps,
 			amount_tolerance_bps: pol.amount_tolerance_bps,
 			name_match: pol.name_match,
+			require_verified_name_match: pol.require_verified_name_match,
 			two_person: TwoPerson {
 				enabled: pol.two_person.enabled,
 				approve_over: pol.two_person.approve_over_minor,

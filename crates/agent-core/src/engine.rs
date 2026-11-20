@@ -343,6 +343,9 @@ pub struct EngineConfig {
 	pub max_steps: u32,
 	/// How the customer's name must match the bank's (invariant 4).
 	pub name_match: config::NameMatch,
+	/// Hold a trade whose account isn't in the seller's verified name, when
+	/// the trade carries one.
+	pub require_verified_name_match: bool,
 	/// Never pay below this balance in the payout account (invariant 5).
 	pub min_float: Minor,
 	/// Local limits (invariant 5). `None` only in tests of other things.
@@ -367,6 +370,7 @@ impl EngineConfig {
 			status_errors_before_unknown: 10,
 			max_steps: 16,
 			name_match: policy.name_match,
+			require_verified_name_match: policy.require_verified_name_match,
 			min_float: Minor::default(),
 			limits: None,
 			two_person: policy.two_person.clone(),
@@ -793,19 +797,47 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 					account_masked: Some(opened.identity.account.masked()),
 					..Default::default()
 				};
+				// An offer that pays only verified sellers: the trade carries the
+				// seller's verified name, and the account must be in it. `""`
+				// means RecoilPay couldn't show it: never pay then.
+				let verified = trade
+					.payer_name
+					.as_ref()
+					.filter(|_| self.cfg.require_verified_name_match);
+				if verified.is_some_and(|v| v.name().is_unavailable()) {
+					drop(opened);
+					return self
+						.apply(
+							rec,
+							&Event::Checks(Err(HoldReason::VerifiedNameUnavailable)),
+							masked,
+						)
+						.await;
+				}
+				// Whose name the account must be in, compared with whichever
+				// name the bank (or, if it can't look names up, the seller)
+				// gives. A person may approve after checking.
+				let verified_ok = |other: &str| {
+					rec.overrides.contains(&HoldReason::VerifiedNameMismatch)
+						|| verified.is_none_or(|v| {
+							names::seller_names_match(v.name().expose(), other)
+								== names::SellerNameMatch::Match
+						})
+				};
 				let lookup = self
 					.rail
 					.verify_account(&opened.identity.bank_code, &opened.identity.account)
 					.await;
-				let name_ok = match lookup {
-					Ok(AccountLookup::Name(bank_name)) => {
+				let (name_ok, seller_ok) = match lookup {
+					Ok(AccountLookup::Name(bank_name)) => (
 						rec.overrides.contains(&HoldReason::NameMismatch)
 							|| names::matches(
 								self.cfg.name_match,
 								opened.name.expose(),
 								bank_name.expose(),
-							)
-					}
+							),
+						verified_ok(bank_name.expose()),
+					),
 					Ok(AccountLookup::NotFound) => {
 						drop(opened);
 						return self
@@ -816,7 +848,9 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 							)
 							.await;
 					}
-					Ok(AccountLookup::Unsupported) => true,
+					// No bank lookup: the seller's own account name is all there
+					// is to check against the verified name.
+					Ok(AccountLookup::Unsupported) => (true, verified_ok(opened.name.expose())),
 					Err(e) => {
 						tracing::warn!(trade_id = %rec.trade_id, error = %e, "could not look the account up; next tick");
 						self.metrics.bank_error("lookup");
@@ -827,6 +861,15 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 				if !name_ok {
 					return self
 						.apply(rec, &Event::Checks(Err(HoldReason::NameMismatch)), masked)
+						.await;
+				}
+				if !seller_ok {
+					return self
+						.apply(
+							rec,
+							&Event::Checks(Err(HoldReason::VerifiedNameMismatch)),
+							masked,
+						)
 						.await;
 				}
 				// Read the lock again right before the payout can be reserved:
