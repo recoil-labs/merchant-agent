@@ -1,0 +1,138 @@
+RecoilPay Merchant Agent License
+Version 1.0
+
+Copyright (c) 2026 RECOIL LABS. All rights reserved.
+
+This software is source-available. It is NOT open source. You may read it,
+audit it and run it with RecoilPay, as set out below, and nothing more.
+
+1. Definitions
+
+   "Licensor" means RECOIL LABS ("Recoil Labs").
+
+   "Software" means everything in this repository and everything built from
+   it, including source code, binaries, container images published by
+   Licensor, documentation, examples and test vectors.
+
+   "RecoilPay" means the RecoilPay services Licensor operates, including its
+   aggregator API and the smart contracts RecoilPay settles through.
+
+   "You" means the person or organisation that uses the Software, and
+   "Your" has a matching meaning. "Your Personnel" means Your employees, and
+   the contractors and auditors acting for You, who are bound to keep
+   confidential anything they learn about Your systems.
+
+   "Your Operations" means operating as a merchant or solver on RecoilPay,
+   under an account You registered with Licensor, for Your own business.
+
+2. What You may do
+
+   Subject to Your compliance with this License, Licensor grants You a
+   limited, non-exclusive, non-transferable, non-sublicensable, revocable
+   licence to:
+
+   (a) Review. View, read, inspect, build and test the Software, and let
+       Your Personnel do so for You, to evaluate it and to audit its
+       security and behaviour.
+
+   (b) Run. Install and run the Software, including in production, solely
+       to connect to RecoilPay for Your Operations.
+
+   (c) Configure. Create and change the configuration files the Software
+       reads (for example config.yaml and its secrets), to run it under (b).
+
+   (d) Build an adapter. Write a separate program that connects the Software
+       to Your own payout rails through the adapter protocol described in
+       docs/adapters.md. You may copy and adapt the code in examples/adapter
+       for that purpose. Such an adapter may be used only with the Software
+       under (b).
+
+3. What You may not do
+
+   Except as Section 2 expressly allows, or as Licensor agrees in writing,
+   You may not:
+
+   (a) copy, modify, translate, or create derivative works of the Software,
+       or fork it;
+   (b) distribute, publish, sublicense, sell, rent, lease or lend the
+       Software or any part of it, in source or binary form, to anyone other
+       than Your Personnel;
+   (c) use the Software, or any part of it, with any network, platform or
+       service other than RecoilPay;
+   (d) run the Software for, or offer it as a hosted or managed service to,
+       any other merchant or third party;
+   (e) use the Software, or any part of it, in a product or service that
+       competes with RecoilPay or with the Software;
+   (f) remove or change any copyright, licence or other notice in the
+       Software; or
+   (g) circumvent any security or integrity check in the Software or in
+       RecoilPay.
+
+4. Your adapters and data
+
+   Licensor claims no ownership of adapters You write under Section 2(d)
+   (apart from any code copied from examples/adapter, which stays
+   Licensor's), of Your configuration, or of the data the Software processes
+   for You.
+
+5. Feedback and contributions
+
+   If You send Licensor suggestions, bug reports, patches or other
+   contributions, You grant Licensor a perpetual, irrevocable, worldwide,
+   royalty-free licence to use, modify and distribute them for any purpose,
+   and You confirm You have the right to grant it.
+
+6. Third-party components
+
+   The Software includes and depends on third-party open source components.
+   Each is licensed to You under its own licence, not this License, and
+   nothing in this License limits Your rights under those licences.
+
+7. Ownership and trademarks
+
+   Licensor and its licensors own the Software and keep all rights not
+   expressly granted to You. This License grants no rights in Licensor's
+   names, logos or trademarks, including "Recoil Labs", "RecoilPay" and
+   "Recoil Link".
+
+8. Termination
+
+   This License ends automatically:
+
+   (a) if You breach it and do not cure the breach within 30 days after
+       Licensor notifies You; or
+   (b) when Your account or agreement with Licensor for Your Operations
+       ends.
+
+   When it ends, You must stop running the Software and delete Your copies,
+   except copies You must keep by law (for example audit records), which
+   You may keep but not run. Sections 3 to 7 and 9 to 12 survive
+   termination.
+
+9. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. YOU ARE RESPONSIBLE FOR
+   HOW YOU CONFIGURE AND OPERATE THE SOFTWARE, INCLUDING EVERY PAYOUT IT
+   MAKES THROUGH YOUR ACCOUNTS.
+
+10. Limitation of liability
+
+   TO THE EXTENT PERMITTED BY LAW, LICENSOR WILL NOT BE LIABLE FOR ANY
+   INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR FOR
+   ANY LOSS OF PROFITS, FUNDS, REVENUE OR DATA, ARISING OUT OF OR RELATING
+   TO THE SOFTWARE OR THIS LICENSE, HOWEVER CAUSED. LICENSOR'S TOTAL
+   LIABILITY UNDER THIS LICENSE WILL NOT EXCEED ONE HUNDRED US DOLLARS
+   (USD 100).
+
+11. Other agreements
+
+   If You have a separate written agreement with Licensor that covers the
+   Software, that agreement prevails where it conflicts with this License.
+
+12. Governing law
+
+   This License is governed by the laws of the Federal Republic of Nigeria,
+   and the courts of Nigeria sitting in Abuja have exclusive jurisdiction
+   over any dispute arising from it.

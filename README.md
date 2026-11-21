@@ -28,5 +28,24 @@ deploy/test/smoke.sh                        # build the image and run it with Do
 agent to the RecoilPay aggregator and TypeScript kit byte for byte. Don't edit
 them here; see [`vectors/README.md`](vectors/README.md).
 
-Copyright © Recoil Labs. All rights reserved. Shared with RecoilPay merchant
-partners for review and operation under their agreement with Recoil Labs.
+## Licence
+
+The Merchant Agent is **source-available, not open source.** The code is
+public so you and your security team can check exactly what runs on your
+infrastructure. You may:
+
+- **read and audit** the code, and build and test it;
+- **run it**, including in production, but only to connect to RecoilPay as a
+  merchant on your own RecoilPay account;
+- **configure it**, and write your own payout adapter against
+  [the adapter protocol](docs/adapters.md), starting from
+  [`examples/adapter`](examples/adapter) if you like.
+
+You may not modify or fork it, share or sell copies, use it with any other
+platform, or run it for other merchants. Your rights end when your RecoilPay
+account ends.
+
+This is a summary. The [`LICENSE`](LICENSE) file is what governs. For any other
+use, contact Recoil Labs.
+
+Copyright © 2026 Recoil Labs. All rights reserved.
