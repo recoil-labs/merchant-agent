@@ -688,12 +688,51 @@ async fn cross_site_and_foreign_host_requests_are_refused() {
 			.failed_attempts,
 		0
 	);
+	// "Origin: null" with nothing saying where the form was is refused too.
+	let r = h
+		.send(post("127.0.0.1:8740", Some(("origin", "null"))))
+		.await;
+	assert_eq!(r.status(), StatusCode::FORBIDDEN);
 	// The console's own page, on localhost, still works.
 	let r = h
 		.send(post(
 			"127.0.0.1:8740",
 			Some(("origin", "http://127.0.0.1:8740")),
 		))
+		.await;
+	assert_eq!(r.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn a_browser_can_sign_in_from_the_consoles_own_page() {
+	let h = Harness::new("TEST PAYEE").await;
+	// The pages ask browsers to send their origin on same-site requests.
+	let page = h
+		.send(
+			Request::get("/login")
+				.header(header::HOST, "127.0.0.1:8740")
+				.body(Body::empty())
+				.unwrap(),
+		)
+		.await;
+	assert_eq!(
+		page.headers().get(header::REFERRER_POLICY).unwrap(),
+		"same-origin"
+	);
+	// A page still cached with no-referrer makes the browser send
+	// "Origin: null"; the same-origin fetch metadata lets it through.
+	let r = h
+		.send(
+			Request::post("/login")
+				.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+				.header(header::HOST, "127.0.0.1:8740")
+				.header(header::ORIGIN, "null")
+				.header("sec-fetch-site", "same-origin")
+				.body(Body::from(
+					"username=ola&password=nope%20nope%20nope&code=123456",
+				))
+				.unwrap(),
+		)
 		.await;
 	assert_eq!(r.status(), StatusCode::SEE_OTHER);
 }
