@@ -180,11 +180,24 @@ async fn same_site_only(
 			return refuse();
 		}
 		if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
-			let origin_host = origin
-				.split_once("://")
-				.map(|(_, rest)| rest.to_ascii_lowercase());
-			if origin_host.is_none() || origin_host != host {
-				return refuse();
+			if origin.eq_ignore_ascii_case("null") {
+				// Browsers send "Origin: null" for a form on a page served with
+				// Referrer-Policy: no-referrer, which these pages used to be. Accept
+				// it only when the browser also says the form is on this same site.
+				let same_origin = headers
+					.get("sec-fetch-site")
+					.and_then(|v| v.to_str().ok())
+					.is_some_and(|v| v.eq_ignore_ascii_case("same-origin"));
+				if !same_origin {
+					return refuse();
+				}
+			} else {
+				let origin_host = origin
+					.split_once("://")
+					.map(|(_, rest)| rest.to_ascii_lowercase());
+				if origin_host.is_none() || origin_host != host {
+					return refuse();
+				}
 			}
 		}
 	}
@@ -219,9 +232,12 @@ fn secure(mut r: Response) -> Response {
 		header::X_CONTENT_TYPE_OPTIONS,
 		HeaderValue::from_static("nosniff"),
 	);
+	// same-origin, not no-referrer: with no-referrer a browser sends
+	// "Origin: null" on the console's own forms. Nothing leaks to other sites
+	// either way.
 	h.insert(
 		header::REFERRER_POLICY,
-		HeaderValue::from_static("no-referrer"),
+		HeaderValue::from_static("same-origin"),
 	);
 	r
 }
