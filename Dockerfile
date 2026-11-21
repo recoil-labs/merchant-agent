@@ -32,8 +32,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
 LABEL org.opencontainers.image.title="RecoilPay Merchant Agent" \
       org.opencontainers.image.description="Pays RecoilPay cash-outs from the merchant's own bank rail" \
-      org.opencontainers.image.source="https://github.com/recoil-labs/merchant-agent"
+      org.opencontainers.image.source="https://github.com/recoil-labs/merchant-agent" \
+      org.opencontainers.image.licenses="LicenseRef-RecoilPay-Merchant-Agent"
 COPY --from=build /out/merchant-agent /usr/local/bin/merchant-agent
+COPY --from=build /src/LICENSE /usr/share/doc/merchant-agent/LICENSE
 # The data directory, owned by the agent's user, so a fresh named volume
 # mounted here starts with the right owner.
 COPY --from=build --chown=10001:10001 /out/data /var/lib/merchant-agent

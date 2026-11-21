@@ -4,7 +4,7 @@ description = "The RecoilPay Merchant Agent: pays out naira cash-outs through th
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file.workspace = true
 publish.workspace = true
 build = "build.rs"
 

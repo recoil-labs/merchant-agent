@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Licence.** The agent now ships under the RecoilPay Merchant Agent License
+  ([`LICENSE`](LICENSE)), which replaces the bare "All rights reserved"
+  notice. It is source-available, not open source: you may read, audit and
+  build the code, run it with RecoilPay for your own merchant account,
+  configure it, and write your own payout adapter. You may not modify,
+  fork, redistribute it, or use it with any other platform.
+
 ## 0.2.0
 
 **Required for merchants who require verified sellers.** RecoilPay now lets a

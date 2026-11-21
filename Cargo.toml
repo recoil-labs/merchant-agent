@@ -6,7 +6,7 @@ members = ["crates/agent-core", "crates/merchant-agent"]
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.94.1"
-license = "UNLICENSED"
+license-file = "LICENSE"
 publish = false
 
 [workspace.dependencies]
