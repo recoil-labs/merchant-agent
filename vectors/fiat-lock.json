@@ -1,5 +1,5 @@
 {
-  "_about": "AttestedEscrow lock ids for fiat trades. tradeIdHash = keccak256(utf8(tradeId)); lockId = keccak256(abi.encode(funder, tradeIdHash)), AttestedEscrow.lockIdOf. Computed independently with `cast keccak` and `cast abi-encode`, not by either implementation. Read by the aggregator (recoil-core/aggregator/crates/types/tests/fiat_lock_vector.rs, oif_types::fiat_trades::onchain) and by the Merchant Agent (repo recoil-labs/merchant-agent, crates/agent-core/src/chain/lock_id.rs), so both derive the same lock for the same trade. Test values only.",
+  "_about": "AttestedEscrow lock ids for fiat trades. tradeIdHash = keccak256(utf8(tradeId)); lockId = keccak256(abi.encode(funder, tradeIdHash)), AttestedEscrow.lockIdOf. Computed independently with `cast keccak` and `cast abi-encode`, not by either implementation. Read by the aggregator (recoil-core/aggregator/crates/types/tests/fiat_lock_vector.rs, oif_types::fiat_trades::onchain) and by the Merchant Agent (repo recoil-labs/merchant-agent, crates/agent-core/src/chain/lock_id.rs), so both derive the same lock for the same trade. Test values only. nonces: the Permit2 nonce a trade's lock is signed with, lockNonce = keccak256(utf8(\"recoilpay/fiat-lock-nonce/v1:\" + tradeId)) (oif_types onchain::lock_nonce), computed with `cast keccak`. permit: the EIP-712 digest of Permit2 PermitWitnessTransferFrom with witness EscrowLock(bytes32 tradeId, address counterparty), domain {name: Permit2, chainId, verifyingContract}, the digest AttestedEscrow.lockFor verifies; the same vector as attested-escrow/test/fixtures/README.md (pinned there by the Solidity test against viem). The aggregator relay (oif_service::lock_for_digest) checks it, and the Merchant Agent signs merchant-signed purchase locks with it (crates/agent-core/src/purchases/permit.rs).",
   "cases": [
     {
       "tradeId": "ft-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
@@ -19,5 +19,29 @@
       "tradeIdHash": "0xaddb6c45e1cfd144849b335b8149c5a2395a9eade7c3ae7a4a0cb27f200cf35d",
       "lockId": "0x29b14fa2c81de0902ba417e50d0acc5065bea8c5324bb966ac93d238a1d71236"
     }
-  ]
+  ],
+  "nonces": [
+    {
+      "tradeId": "ft-on-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
+      "nonce": "0x2bb0352cb972441ad17570566b10d6b542fbb972886f25ef899e76000026baab",
+      "nonceDecimal": "19760784570805263875262786391200291693405868899304954254016520313359638641323"
+    },
+    {
+      "tradeId": "ft-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
+      "nonce": "0xa3885f027927b1981f19d89051407b8b03cab34d491d9b48d34cdd0bb6b40b73",
+      "nonceDecimal": "73967941252464236355781444770322550280233029242259009938298765847014256413555"
+    }
+  ],
+  "permit": {
+    "chainId": 31337,
+    "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "spender": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "amount": "100000000",
+    "nonce": "42",
+    "deadline": "1800000000",
+    "tradeIdHash": "0x574493e7808fd8fb322fa3cea850adb2f31ab79880bb3495dfa9142d66d6f0c9",
+    "counterparty": "0x00000000000000000000000000000000000B0b01",
+    "digest": "0x659b2b55abb01e3b961e81aefc76f902e921f3edbc5cfbe9c0f3ee5cea89fb85"
+  }
 }

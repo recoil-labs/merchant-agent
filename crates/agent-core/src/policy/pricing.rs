@@ -18,7 +18,20 @@
 //! ```
 //!
 //! All integer arithmetic, all checked. An overflow refuses to price.
+//!
+//! **Purchases** (merchant-signed on-ramp, v0.3) price the other way, as
+//! `FiatQuote::price_onramp` does, pinned by `onrampCases` in the same file:
+//!
+//! ```text
+//! fee   = fee_fixed + ceil(gross × fee_bps / 10 000)   (min_fiat ≤ gross ≤ max_fiat, fee < gross)
+//! net   = gross − fee
+//! asset = floor(net × 10^(decimals + s) / (R × 10^2))  (asset > 0)
+//! ```
+//!
+//! `asset` is the whole lock the merchant signs for: the escrow takes the
+//! protocol fee out of it at release.
 
+use crate::aggregator::types::Direction;
 use crate::machine::HoldReason;
 use crate::money::Minor;
 
@@ -26,6 +39,9 @@ use crate::money::Minor;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuoteTerms {
 	pub quote_id: String,
+	/// Cash-outs are priced only on off-ramp terms, purchases only on
+	/// on-ramp ones.
+	pub direction: Direction,
 	pub chain: String,
 	pub asset: String,
 	pub asset_decimals: u8,
@@ -107,6 +123,45 @@ pub fn price_offramp(terms: &QuoteTerms, convertible: u128) -> Result<Price, Pri
 	})
 }
 
+/// What a buyer's fiat buys on an on-ramp quote: the asset, in base units,
+/// that the merchant's lock must hold.
+pub fn price_onramp(terms: &QuoteTerms, gross: u128) -> Result<u128, PriceError> {
+	use PriceError::*;
+	let e = fiat_minor_exponent(&terms.fiat_currency).ok_or(Unpriceable)?;
+	let (r, s) = parse_rate(&terms.rate).ok_or(Unpriceable)?;
+	if r == 0 {
+		return Err(Unpriceable);
+	}
+	if gross < terms.min_fiat.get() || gross > terms.max_fiat.get() {
+		return Err(OutOfBand);
+	}
+	let proportional = gross
+		.checked_mul(terms.fee_bps as u128)
+		.ok_or(Unpriceable)?
+		.div_ceil(10_000);
+	let fee = terms
+		.fee_fixed
+		.get()
+		.checked_add(proportional)
+		.ok_or(Unpriceable)?;
+	if fee >= gross {
+		return Err(NothingLeft);
+	}
+	let net = gross - fee;
+	let ten = |p: u32| 10u128.checked_pow(p).ok_or(Unpriceable);
+	let up = terms.asset_decimals as u32 + s;
+	let (num, den) = if up >= e {
+		(net.checked_mul(ten(up - e)?).ok_or(Unpriceable)?, r)
+	} else {
+		(net, r.checked_mul(ten(e - up)?).ok_or(Unpriceable)?)
+	};
+	let asset = num / den;
+	if asset == 0 {
+		return Err(NothingLeft);
+	}
+	Ok(asset)
+}
+
 /// What the trade claims, for the check.
 #[derive(Debug, Clone, Copy)]
 pub struct Claimed<'a> {
@@ -129,7 +184,8 @@ pub fn check_amount(
 	tolerance_bps: u32,
 ) -> Result<Price, HoldReason> {
 	let mismatch = Err(HoldReason::AmountMismatch);
-	if claimed.chain != terms.chain
+	if terms.direction != Direction::Offramp
+		|| claimed.chain != terms.chain
 		|| claimed.rail != terms.rail
 		|| claimed.fiat_currency != terms.fiat_currency
 		|| claimed.rate != terms.rate
@@ -198,6 +254,7 @@ mod tests {
 		let m = |k: &str| Minor::parse(q[k].as_str().unwrap()).unwrap();
 		QuoteTerms {
 			quote_id: "fq-vector".into(),
+			direction: Direction::Offramp,
 			chain: "eip155:84532".into(),
 			asset: "USDC".into(),
 			asset_decimals: q["assetDecimals"].as_u64().unwrap() as u8,
@@ -237,5 +294,56 @@ mod tests {
 				(got, want) => panic!("{name}: got {got:?}, want {want:?}"),
 			}
 		}
+	}
+
+	#[test]
+	fn purchases_price_as_the_shared_vector_says() {
+		let v: Value = serde_json::from_str(VECTOR).unwrap();
+		let cases = v["onrampCases"].as_array().unwrap();
+		assert!(cases.len() >= 8);
+		for c in cases {
+			let name = c["name"].as_str().unwrap();
+			let gross: u128 = c["fiatMinorUnits"].as_str().unwrap().parse().unwrap();
+			let mut t = terms(&c["quote"]);
+			t.direction = Direction::Onramp;
+			let expect = &c["expect"];
+			match (price_onramp(&t, gross), expect["error"].as_str()) {
+				(Ok(asset), None) => assert_eq!(
+					asset.to_string(),
+					expect["asset"].as_str().unwrap(),
+					"{name}"
+				),
+				(Err(PriceError::OutOfBand), Some("out_of_band"))
+				| (Err(PriceError::NothingLeft), Some("nothing_left")) => {}
+				(got, want) => panic!("{name}: got {got:?}, want {want:?}"),
+			}
+		}
+	}
+
+	#[test]
+	fn a_cash_out_is_never_priced_on_purchase_terms() {
+		let v: Value = serde_json::from_str(VECTOR).unwrap();
+		let c = &v["cases"][0];
+		let mut t = terms(&c["quote"]);
+		t.direction = Direction::Onramp;
+		let claimed = Claimed {
+			chain: &t.chain,
+			rail: &t.rail,
+			fiat_currency: &t.fiat_currency,
+			rate: &t.rate.clone(),
+			asset: Minor::parse(c["assetMinorUnits"].as_str().unwrap()).unwrap(),
+			fiat: Minor::parse(c["expect"]["net"].as_str().unwrap()).unwrap(),
+			fee: Minor::parse(c["expect"]["fee"].as_str().unwrap()).unwrap(),
+			lock_protocol_fee: Minor::parse(c["protocolFee"].as_str().unwrap()).unwrap(),
+		};
+		assert_eq!(
+			check_amount(&claimed, &t, 0),
+			Err(HoldReason::AmountMismatch)
+		);
+		t.direction = Direction::Offramp;
+		assert!(
+			check_amount(&claimed, &t, 0).is_ok(),
+			"the same terms as a cash-out quote price it"
+		);
 	}
 }

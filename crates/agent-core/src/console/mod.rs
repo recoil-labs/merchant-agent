@@ -56,6 +56,8 @@ pub struct Snapshot {
 	pub today: Minor,
 	pub last_tick: Option<DateTime<Utc>>,
 	pub lease_holder: Option<String>,
+	/// Merchant-signed purchases signed and refused, once there are any.
+	pub purchases: Option<crate::store::PurchaseStats>,
 }
 
 /// What the console asks the agent to do. Object-safe, so the console

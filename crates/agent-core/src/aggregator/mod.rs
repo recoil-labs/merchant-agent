@@ -27,7 +27,10 @@ use serde::Serialize;
 
 use crate::config::{Config, Mode};
 use crate::secrets::Secret;
-pub use types::{ChainInfo, ErrorBody, Quote, QuoteInput, Trade, TradeState};
+pub use types::{
+	ChainInfo, ErrorBody, PurchaseFunding, PurchaseFundingMode, PurchaseLock, Quote, QuoteInput,
+	Trade, TradeState,
+};
 
 /// Largest response the agent will read. A trade list is a few kB per
 /// trade; anything far beyond this is not a response the agent asked for.
@@ -401,6 +404,48 @@ impl Client {
 			.retrying(|| self.call(Method::PUT, &path, Some(&body)))
 			.await?;
 		Ok(r.quotes)
+	}
+
+	/// Purchases waiting for this merchant's signature, oldest first.
+	pub async fn get_purchase_locks(&self) -> Result<Vec<PurchaseLock>, AggregatorError> {
+		let path = self.operator_path("purchase-locks");
+		let r: types::PurchaseLocksResponse = self
+			.retrying(|| self.call(Method::GET, &path, None::<&()>))
+			.await?;
+		Ok(r.locks)
+	}
+
+	/// The operator's purchase funding on every eligible chain.
+	pub async fn get_purchase_funding(&self) -> Result<Vec<PurchaseFunding>, AggregatorError> {
+		let path = self.operator_path("purchase-funding");
+		let r: types::PurchaseFundingList = self
+			.retrying(|| self.call(Method::GET, &path, None::<&()>))
+			.await?;
+		Ok(r.chains)
+	}
+
+	/// Send the float wallet's signature for one purchase, and return the
+	/// trade's state after it (`awaiting_fiat` once locked, `quoted` while
+	/// RecoilPay waits for the chain). Safe to repeat: the nonce is the
+	/// trade's, so RecoilPay relays one lock at most, and a second post of
+	/// the same signature answers with the trade as it is.
+	///
+	/// Only the state is read: no money decision rests on this answer, and a
+	/// signature RecoilPay accepted must not look refused because some other
+	/// field of the trade changed.
+	pub async fn post_purchase_lock(
+		&self,
+		trade_id: &str,
+		signature: &str,
+	) -> Result<String, AggregatorError> {
+		let path = self.operator_path(&format!("fiat-trades/{}/purchase-lock", segment(trade_id)?));
+		let body = serde_json::json!({ "signature": signature });
+		let trade: serde_json::Value = self
+			.retrying(|| self.call(Method::POST, &path, Some(&body)))
+			.await?;
+		trade["state"].as_str().map(str::to_string).ok_or_else(|| {
+			AggregatorError::Decode("the purchase lock answer has no trade state".into())
+		})
 	}
 
 	/// Tell the platform the agent is alive. Safe to repeat.

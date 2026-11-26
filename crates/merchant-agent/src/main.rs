@@ -835,6 +835,7 @@ fn cmd_alerts_test(path: &Path) -> ExitCode {
 		account_masked: Some("******0000".into()),
 		amount: money::Minor(100),
 		detail: Some("This is a test alert from merchant-agent alerts test.".into()),
+		purchase_refusal: None,
 	};
 	rt.block_on(alerter.deliver(&[test], chrono::Utc::now()));
 	println!(

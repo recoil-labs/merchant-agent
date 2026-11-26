@@ -264,6 +264,17 @@ pub fn dashboard(
 						@if let Some(h) = &snap.lease_holder { br; "Lease: " code { (h) } }
 					}
 				}
+				@if let Some(p) = &snap.purchases {
+					div.card.urgent[p.refused > 0] {
+						div.muted { "Purchases" }
+						div.big { (p.signed) " signed" }
+						p.muted {
+							(p.refused) " refused"
+							@if let Some(ms) = p.median_sign_millis { br; "Median time to sign " (format!("{}.{}", ms / 1000, (ms % 1000) / 100)) "s" }
+							br; "Refusals are in the audit log (" code { "merchant-agent audit export" } ")."
+						}
+					}
+				}
 			}
 		},
 	)

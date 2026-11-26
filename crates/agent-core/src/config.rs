@@ -281,6 +281,59 @@ pub struct EmailAlerts {
 	pub to: Vec<String>,
 }
 
+/// Merchant-signed purchases (v0.3): the agent signs the Permit2 lock for
+/// each of the operator's purchases from its own float wallet, so RecoilPay
+/// never holds the merchant's sale USDC. Off unless `enabled`.
+///
+/// Every money limit must be set explicitly when purchases are on.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Purchases {
+	#[serde(default)]
+	pub enabled: bool,
+	/// The float wallet's private key (hex). Its own key, never the payee
+	/// key.
+	pub signer: Option<SecretRef>,
+	/// The most naira (kobo) one purchase may be for.
+	pub max_per_trade_minor: Option<Minor>,
+	/// The most naira (kobo) of purchases signed in one Lagos day.
+	pub max_per_day_minor: Option<Minor>,
+	/// Per chain (CAIP-2): never sign a purchase that would leave the float
+	/// wallet with less than this much USDC, in base units. Every configured
+	/// chain needs one.
+	#[serde(default)]
+	pub float_floor: std::collections::BTreeMap<String, Minor>,
+	/// How often to ask RecoilPay for purchases to sign.
+	#[serde(default = "default_purchase_poll_secs")]
+	pub poll_secs: u64,
+	/// Refuse a lock whose Permit2 deadline is further away than this.
+	#[serde(default = "default_purchase_max_deadline_secs")]
+	pub max_deadline_secs: u64,
+}
+
+/// Off, with the same defaults a written section gets.
+impl Default for Purchases {
+	fn default() -> Self {
+		Self {
+			enabled: false,
+			signer: None,
+			max_per_trade_minor: None,
+			max_per_day_minor: None,
+			float_floor: Default::default(),
+			poll_secs: default_purchase_poll_secs(),
+			max_deadline_secs: default_purchase_max_deadline_secs(),
+		}
+	}
+}
+
+fn default_purchase_poll_secs() -> u64 {
+	2
+}
+
+fn default_purchase_max_deadline_secs() -> u64 {
+	300
+}
+
 /// Screening (design §3.7): payees on the deny-list are held.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -379,6 +432,8 @@ struct RawConfig {
 	#[serde(default)]
 	screening: Screening,
 	#[serde(default)]
+	purchases: Purchases,
+	#[serde(default)]
 	alerts: Alerts,
 	#[serde(default)]
 	server: Server,
@@ -400,6 +455,7 @@ pub struct Config {
 	pub policy: Policy,
 	pub pricing: Pricing,
 	pub screening: Screening,
+	pub purchases: Purchases,
 	pub alerts: Alerts,
 	pub server: Server,
 	pub storage: Storage,
@@ -439,6 +495,14 @@ impl Config {
 		];
 		if let Some(c) = &self.rail.credentials {
 			out.push(("bank rail credentials", c));
+		}
+		if let Some(s) = self
+			.purchases
+			.signer
+			.as_ref()
+			.filter(|_| self.purchases.enabled)
+		{
+			out.push(("purchase float wallet key", s));
 		}
 		if let Some(w) = &self.alerts.webhook {
 			out.push(("alert webhook URL", w));
@@ -709,6 +773,9 @@ impl RawConfig {
 			if let Some(c) = &self.rail.credentials {
 				refs.push(("rail.credentials", c));
 			}
+			if let Some(s) = &self.purchases.signer {
+				refs.push(("purchases.signer", s));
+			}
 			for (field, r) in [
 				("alerts.webhook", self.alerts.webhook.as_ref()),
 				(
@@ -740,6 +807,8 @@ impl RawConfig {
 			}
 		}
 
+		validate_purchases(&self.purchases, &self.payee, &self.chains, &mut p);
+
 		if self.logging.level.parse::<tracing::Level>().is_err() {
 			p.push("logging.level must be one of error, warn, info, debug, trace".into());
 		}
@@ -756,12 +825,62 @@ impl RawConfig {
 				policy,
 				pricing: self.pricing,
 				screening: self.screening,
+				purchases: self.purchases,
 				alerts: self.alerts,
 				server: self.server,
 				storage: self.storage,
 				logging: self.logging,
 			}),
 			_ => Err(ConfigError::Invalid(p)),
+		}
+	}
+}
+
+fn validate_purchases(u: &Purchases, payee: &Payee, chains: &[Chain], p: &mut Vec<String>) {
+	if !(1..=10).contains(&u.poll_secs) {
+		p.push("purchases.poll_secs must be between 1 and 10".into());
+	}
+	if !(30..=600).contains(&u.max_deadline_secs) {
+		p.push("purchases.max_deadline_secs must be between 30 and 600".into());
+	}
+	if !u.enabled {
+		return;
+	}
+	match &u.signer {
+		None => p.push("purchases.signer must reference your float wallet's private key".into()),
+		Some(s) if *s == payee.private_key || *s == payee.tag_pepper => p.push(
+			"purchases.signer must be the float wallet's own key, never the payee key or pepper"
+				.into(),
+		),
+		Some(_) => {}
+	}
+	match (u.max_per_trade_minor, u.max_per_day_minor) {
+		(Some(t), Some(d)) => {
+			if t.get() == 0 || d.get() == 0 {
+				p.push("purchases.max_per_trade_minor and max_per_day_minor must be more than 0".into());
+			}
+			if t > d {
+				p.push("purchases.max_per_trade_minor cannot be more than purchases.max_per_day_minor".into());
+			}
+		}
+		_ => p.push(
+			"purchases.max_per_trade_minor and purchases.max_per_day_minor must both be set (there are no defaults for money)"
+				.into(),
+		),
+	}
+	for c in chains {
+		if !u.float_floor.contains_key(&c.caip2) {
+			p.push(format!(
+				"purchases.float_floor needs an entry for {} (USDC base units; 0 for none)",
+				c.caip2
+			));
+		}
+	}
+	for chain in u.float_floor.keys() {
+		if !chains.iter().any(|c| &c.caip2 == chain) {
+			p.push(format!(
+				"purchases.float_floor names {chain}, which is not in chains"
+			));
 		}
 	}
 }

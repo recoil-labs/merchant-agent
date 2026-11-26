@@ -29,6 +29,7 @@ use crate::notify::{Alerter, Email, Notifier, PagerDuty, Webhook};
 use crate::payee::PayeePrivateKey;
 use crate::policy::screening::DenyList;
 use crate::policy::PolicyChecks;
+use crate::purchases::{ChainFloats, ChainPin, Purchases, Rules as PurchaseRules};
 use crate::rail::manual::ManualRail;
 use crate::rail::paystack::{self, PaystackRail};
 use crate::rail::simulated::SimulatedRail;
@@ -43,6 +44,13 @@ const SANDBOX_BALANCE: Minor = Minor(10_000_000_000);
 /// One line for people: what happened, what the agent did, what to do.
 pub fn describe(alert: &Alert) -> String {
 	use crate::machine::AgentState as S;
+	if let Some(why) = &alert.purchase_refusal {
+		return format!(
+			"Purchase {}: refused, {}. {why} The agent signed nothing, so none of your USDC moved; the buyer is told you didn't confirm. Review it under Purchases in the console.",
+			alert.trade_id,
+			naira(alert.amount),
+		);
+	}
 	let what = match &alert.state {
 		S::Held(r) => r.message().to_string(),
 		S::NeedsPerson(r) => r.message().to_string(),
@@ -202,6 +210,29 @@ pub async fn run(
 		&payee_secret,
 	)
 	.map_err(|e| format!("the payee key: {e}"))?;
+	// The float wallet's key: its own secret, never the payee key.
+	let mut purchase_key = None;
+	if config.purchases.enabled {
+		let r = config
+			.purchases
+			.signer
+			.as_ref()
+			.ok_or("purchases.signer must reference your float wallet's private key")?;
+		let signer = secrets
+			.resolve(r)
+			.await
+			.map_err(read("the purchase float wallet key"))?;
+		if signer.expose().trim() == payee_secret.expose().trim() {
+			return Err(
+				"purchases.signer holds the payee key; the float wallet needs its own key".into(),
+			);
+		}
+		fingerprints.push((
+			"purchase_signer",
+			fingerprint(&pepper, "purchase_signer", signer.expose()),
+		));
+		purchase_key = Some(crate::purchases::permit::signing_key(signer.expose())?);
+	}
 	drop(payee_secret);
 	let mut rail_key = None;
 	if let Some(r) = &config.rail.credentials {
@@ -216,6 +247,12 @@ pub async fn run(
 		rail_key = Some(c);
 	}
 
+	// The purchase watcher has its own client, so its 2-second poll never
+	// waits behind the engine's calls.
+	let purchase_api_key = config
+		.purchases
+		.enabled
+		.then(|| crate::secrets::Secret::new(api_key.expose().to_string()));
 	let client = Client::from_config(&config, api_key).map_err(|e| e.to_string())?;
 	let registered = client
 		.get_payee_key()
@@ -227,6 +264,7 @@ pub async fn run(
 
 	let timeout = Duration::from_secs(config.aggregator.request_timeout_secs);
 	let mut chains = HashMap::new();
+	let mut floats = HashMap::new();
 	for chain in &config.chains {
 		let mut urls = Vec::new();
 		for rpc in &chain.rpcs {
@@ -243,6 +281,11 @@ pub async fn run(
 				(None, None) => {}
 			}
 		}
+		if purchase_key.is_some() {
+			let reader =
+				ChainReader::new(chain, urls.clone(), timeout, prod).map_err(|e| e.to_string())?;
+			floats.insert(chain.caip2.clone(), Arc::new(reader));
+		}
 		let reader = ChainReader::new(chain, urls, timeout, prod).map_err(|e| e.to_string())?;
 		chains.insert(chain.caip2.clone(), (chain.clone(), reader));
 	}
@@ -255,6 +298,10 @@ pub async fn run(
 		Some(path) => DenyList::load(path)?,
 		None => DenyList::parse("")?,
 	};
+	let screening_for_purchases = Arc::new(match &config.screening.deny_list {
+		Some(path) => DenyList::load(path)?,
+		None => DenyList::parse("")?,
+	});
 
 	let alerter = alerter(&config, &secrets).await?;
 	let console = ConsoleParts {
@@ -281,10 +328,29 @@ pub async fn run(
 	};
 	let cfg = EngineConfig::from_config(&config);
 	let poll = Duration::from_secs(config.aggregator.poll_secs);
+	let purchases = match (purchase_key, purchase_api_key) {
+		(Some(key), Some(api_key)) => {
+			let client = Client::from_config(&config, api_key).map_err(|e| e.to_string())?;
+			Some(Arc::new(
+				purchase_watcher(
+					&config,
+					&store,
+					client,
+					floats,
+					key,
+					&screening_for_purchases,
+				)
+				.await?,
+			))
+		}
+		_ => None,
+	};
 	let shell = Shell {
 		alerter,
 		console,
 		poll,
+		purchases,
+		purchase_poll: Duration::from_secs(config.purchases.poll_secs),
 	};
 
 	match config.rail.kind {
@@ -463,11 +529,92 @@ struct ConsoleParts {
 	hostnames: Vec<String>,
 }
 
-/// What runs around the engine: alerts, the console, the pace.
+/// What runs around the engine: alerts, the console, the pace, and the
+/// purchase watcher when purchases are enabled.
 struct Shell {
 	alerter: Alerter,
 	console: ConsoleParts,
 	poll: Duration,
+	purchases: Option<Arc<Purchases<Client, ChainFloats>>>,
+	purchase_poll: Duration,
+}
+
+/// The purchase watcher, once its float wallet is the one RecoilPay has
+/// registered on every chain set to merchant-signed.
+async fn purchase_watcher(
+	config: &Config,
+	store: &Arc<Store>,
+	client: Client,
+	floats: HashMap<String, Arc<ChainReader>>,
+	key: k256::ecdsa::SigningKey,
+	deny: &Arc<DenyList>,
+) -> Result<Purchases<Client, ChainFloats>, String> {
+	let mut pins = Vec::new();
+	for c in &config.chains {
+		let parse = |what: &str, s: &str| {
+			s.parse()
+				.map_err(|_| format!("{}: {what} is not an address", c.name))
+		};
+		pins.push(ChainPin {
+			caip2: c.caip2.clone(),
+			chain_id: c
+				.caip2
+				.strip_prefix("eip155:")
+				.and_then(|n| n.parse().ok())
+				.ok_or_else(|| format!("{} is not an EVM chain", c.caip2))?,
+			escrow: parse("escrow", &c.escrow)?,
+			usdc: parse("usdc", &c.usdc)?,
+			usdc_decimals: c.usdc_decimals,
+			float_floor: config
+				.purchases
+				.float_floor
+				.get(&c.caip2)
+				.map(|m| m.get())
+				.unwrap_or(u128::MAX),
+		});
+	}
+	let rules = PurchaseRules {
+		solver_id: config.operator.solver_id.clone(),
+		max_per_trade: config.purchases.max_per_trade_minor.unwrap_or_default(),
+		max_per_day: config.purchases.max_per_day_minor.unwrap_or_default(),
+		max_deadline_secs: config.purchases.max_deadline_secs as i64,
+		max_rate_deviation_bps: config.policy.max_rate_deviation_bps,
+	};
+	let float_wallet = format!("{:#x}", crate::purchases::permit::address_of(&key));
+	let registered = client
+		.get_purchase_funding()
+		.await
+		.map_err(|e| format!("reading the registered purchase funding: {e}"))?;
+	let signed: Vec<_> = registered
+		.iter()
+		.filter(|f| f.mode == crate::aggregator::PurchaseFundingMode::MerchantSigned)
+		.collect();
+	for f in &signed {
+		if !f
+			.float_wallet
+			.as_deref()
+			.is_some_and(|w| w.eq_ignore_ascii_case(&float_wallet))
+		{
+			return Err(format!(
+				"purchases.signer is {float_wallet}, but RecoilPay has {} as the float wallet on {}; run `merchant-agent doctor`",
+				f.float_wallet.as_deref().unwrap_or("none"),
+				f.chain
+			));
+		}
+	}
+	if signed.is_empty() {
+		tracing::warn!("purchases are enabled, but no chain is set to merchant-signed in RecoilPay; nothing will be asked to sign until you set it in the portal");
+	}
+	tracing::info!(%float_wallet, chains = signed.len(), "signing merchant-signed purchases");
+	Ok(Purchases::new(
+		store.clone(),
+		client,
+		ChainFloats(floats),
+		key,
+		pins,
+		rules,
+		deny.clone(),
+	))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -515,7 +662,25 @@ where
 		alerter,
 		console,
 		poll,
+		purchases,
+		purchase_poll,
 	} = shell;
+	// Started only now, holding the lease: every purchase write checks it.
+	if let Some(p) = purchases.clone() {
+		tokio::spawn(async move {
+			loop {
+				match p.tick(chrono::Utc::now()).await {
+					Ok(()) => {}
+					Err(crate::purchases::PurchaseError::Store(StoreError::LeaseLost)) => {
+						tracing::error!("the purchase watcher lost the lease and stopped signing");
+						return;
+					}
+					Err(e) => tracing::error!(error = %e, "purchase pass failed; trying again"),
+				}
+				tokio::time::sleep(purchase_poll).await;
+			}
+		});
+	}
 	let bind = console.bind;
 	let health_bind = console.health;
 	let console = Arc::new(Console {
@@ -568,7 +733,10 @@ where
 		// Every tick, even with nothing new: a summary of alerts held back
 		// last minute goes out as soon as the minute turns, not only when
 		// some later alert happens to arrive.
-		let alerts = engine.take_alerts();
+		let mut alerts = engine.take_alerts();
+		if let Some(p) = &purchases {
+			alerts.extend(p.take_alerts());
+		}
 		alerter.deliver(&alerts, chrono::Utc::now()).await;
 		tokio::select! {
 			_ = &mut stop => {

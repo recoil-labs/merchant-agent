@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Merchant-signed purchases** ([docs/purchases.md](docs/purchases.md)),
+  off unless `purchases.enabled`. The agent signs each purchase's Permit2
+  lock from your own float wallet, so RecoilPay never holds your sale USDC;
+  its fill wallet only relays and pays gas. It signs only what your own
+  first-seen purchase offer gives for the buyer's naira (pinned by
+  `vectors/fiat-pricing.json` `onrampCases`), inside your rate band,
+  purchase limits and float floor, for a buyer not on your deny list, with
+  the chain, escrow and USDC from your config. The digest and nonce are
+  pinned by `vectors/fiat-lock.json`. Refusals are recorded, audited and
+  alerted. Signatures are stored before posting and re-posted after a
+  crash, never signed twice.
+- **New settings:** `purchases.enabled`, `purchases.signer` (its own
+  secret, never the payee key), `purchases.max_per_trade_minor`,
+  `purchases.max_per_day_minor`, `purchases.float_floor` (per chain),
+  `purchases.poll_secs`, `purchases.max_deadline_secs`.
+- **`doctor`** checks the float wallet key, that RecoilPay has it
+  registered, and on each merchant-signed chain the Permit2 allowance and
+  the balance against the floor.
+- **The deny list** also takes buyer wallets (`0x…` lines).
+- **The quote history records direction** (database migration 5; older
+  quotes are cash-out quotes). A cash-out is priced only on cash-out terms,
+  a purchase only on purchase terms.
+- **The console** dashboard shows purchases signed and refused, and the
+  median time to sign.
+
 - **Licence.** The agent now ships under the RecoilPay Merchant Agent License
   ([`LICENSE`](LICENSE)), which replaces the bare "All rights reserved"
   notice. It is source-available, not open source: you may read, audit and

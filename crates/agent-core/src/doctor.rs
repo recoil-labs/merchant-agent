@@ -92,6 +92,11 @@ const AGGREGATOR: [&str; 4] = [
 
 const RPC: &str = "RPC reachable, right chain id, escrow deployed";
 
+const PURCHASES: &str = "Merchant-signed purchases";
+const PURCHASE_KEY: &str = "Float wallet key is a valid key, not the payee key";
+const PURCHASE_REGISTERED: &str = "Float wallet matches the one registered with RecoilPay";
+const PURCHASE_FLOAT: &str = "Float wallet funded above its floor, Permit2 approved";
+
 const DATABASE: &str = "Database opens and migrations are current";
 const LEASE: &str = "No other agent holds the lease";
 
@@ -179,6 +184,7 @@ pub async fn run(config_path: &Path) -> Report {
 
 	aggregator_checks(&mut r, &config, &secrets).await;
 	rpc_checks(&mut r, &config, &secrets).await;
+	purchase_checks(&mut r, &config, &secrets).await;
 	store_checks(&mut r, &config);
 	r.add(RAIL, rail_check(&config, &secrets).await);
 	r.add(PRICING, pricing_check(&config));
@@ -193,6 +199,7 @@ fn skip_rest(r: &mut Report, why: &str) {
 		r.add(name, Outcome::Skip(why.into()));
 	}
 	r.add(RPC, Outcome::Skip(why.into()));
+	r.add(PURCHASES, Outcome::Skip(why.into()));
 	r.add(DATABASE, Outcome::Skip(why.into()));
 	r.add(LEASE, Outcome::Skip(why.into()));
 	r.add(RAIL, Outcome::Skip(why.into()));
@@ -286,6 +293,188 @@ async fn rpc_checks(r: &mut Report, config: &Config, secrets: &Secrets) {
 			},
 		};
 		r.add(RPC, outcome);
+	}
+}
+
+/// Merchant-signed purchases (v0.3): the float wallet key, its registration
+/// with RecoilPay, and on each chain its balance and Permit2 allowance.
+async fn purchase_checks(r: &mut Report, config: &Config, secrets: &Secrets) {
+	if !config.purchases.enabled {
+		r.add(
+			PURCHASES,
+			Outcome::Skip("not enabled (purchases.enabled)".into()),
+		);
+		return;
+	}
+	r.add(PURCHASES, Outcome::Pass("enabled".into()));
+	let Some(signer_ref) = &config.purchases.signer else {
+		return;
+	};
+	let key = match secrets.resolve(signer_ref).await {
+		Err(_) => {
+			r.add(
+				PURCHASE_KEY,
+				Outcome::Skip("its secret could not be read (see above)".into()),
+			);
+			return;
+		}
+		Ok(v) => {
+			let same_as_payee = match secrets.resolve(&config.payee.private_key).await {
+				Ok(p) => p.expose().trim() == v.expose().trim(),
+				Err(_) => false,
+			};
+			match crate::purchases::permit::signing_key(v.expose()) {
+				Err(e) => {
+					r.add(
+						PURCHASE_KEY,
+						Outcome::Fail {
+							why: e,
+							fix:
+								"purchases.signer must hold the float wallet's private key, as hex"
+									.into(),
+						},
+					);
+					return;
+				}
+				Ok(_) if same_as_payee => {
+					r.add(
+						PURCHASE_KEY,
+						Outcome::Fail {
+							why: "it is the payee key".into(),
+							fix: "give the float wallet its own key; the payee key only opens bank details".into(),
+						},
+					);
+					return;
+				}
+				Ok(k) => k,
+			}
+		}
+	};
+	let wallet = crate::purchases::permit::address_of(&key);
+	r.add(PURCHASE_KEY, Outcome::Pass(format!("signs as {wallet:#x}")));
+
+	// Registered with RecoilPay.
+	let registered = match secrets.resolve(&config.aggregator.api_key).await {
+		Err(_) => None,
+		Ok(api_key) => match crate::aggregator::Client::from_config(config, api_key) {
+			Err(_) => None,
+			Ok(client) => match client.get_purchase_funding().await {
+				Ok(f) => Some(f),
+				Err(e) => {
+					r.add(
+						PURCHASE_REGISTERED,
+						Outcome::Fail {
+							why: e.to_string(),
+							fix: "check the aggregator URL and API key (see above)".into(),
+						},
+					);
+					return;
+				}
+			},
+		},
+	};
+	let Some(registered) = registered else {
+		r.add(
+			PURCHASE_REGISTERED,
+			Outcome::Skip("needs the aggregator (see above)".into()),
+		);
+		return;
+	};
+	let signed: Vec<_> = registered
+		.iter()
+		.filter(|f| f.mode == crate::aggregator::PurchaseFundingMode::MerchantSigned)
+		.collect();
+	let wrong: Vec<String> = signed
+		.iter()
+		.filter(|f| {
+			!f.float_wallet
+				.as_deref()
+				.is_some_and(|w| w.eq_ignore_ascii_case(&format!("{wallet:#x}")))
+		})
+		.map(|f| {
+			format!(
+				"{} has {}",
+				f.chain,
+				f.float_wallet.as_deref().unwrap_or("none")
+			)
+		})
+		.collect();
+	if !wrong.is_empty() {
+		r.add(
+			PURCHASE_REGISTERED,
+			Outcome::Fail {
+				why: format!("RecoilPay's float wallet differs: {}", wrong.join("; ")),
+				fix: format!("register {wallet:#x} as the float wallet in the portal (Fiat offers → Purchases), or point purchases.signer at the registered wallet's key"),
+			},
+		);
+	} else if signed.is_empty() {
+		r.add(
+			PURCHASE_REGISTERED,
+			Outcome::Warn("no chain is set to merchant-signed yet; set it in the portal (Fiat offers → Purchases) with this wallet".into()),
+		);
+	} else {
+		r.add(
+			PURCHASE_REGISTERED,
+			Outcome::Pass(
+				signed
+					.iter()
+					.map(|f| f.chain.as_str())
+					.collect::<Vec<_>>()
+					.join(", "),
+			),
+		);
+	}
+
+	// Each merchant-signed chain's float, through the merchant's own RPCs.
+	let timeout = Duration::from_secs(config.aggregator.request_timeout_secs);
+	for f in &signed {
+		let Some(chain) = config.chains.iter().find(|c| c.caip2 == f.chain) else {
+			r.add(
+				PURCHASE_FLOAT,
+				Outcome::Warn(format!(
+					"{} is merchant-signed in RecoilPay but not in your chains",
+					f.chain
+				)),
+			);
+			continue;
+		};
+		let mut urls = Vec::new();
+		for rpc in &chain.rpcs {
+			match (&rpc.url, &rpc.secret) {
+				(Some(u), _) => urls.push(u.clone()),
+				(None, Some(s)) => {
+					if let Ok(v) = secrets.resolve(s).await {
+						urls.push(v.expose().to_string());
+					}
+				}
+				(None, None) => {}
+			}
+		}
+		let floor = config
+			.purchases
+			.float_floor
+			.get(&chain.caip2)
+			.map(|m| m.get())
+			.unwrap_or(0);
+		let outcome = match (ChainReader::new(chain, urls, timeout, config.mode == Mode::Production), chain.usdc.parse()) {
+			(Ok(reader), Ok(usdc)) => match reader.float(usdc, wallet, crate::purchases::permit::PERMIT2).await {
+				Ok((_, allowance)) if allowance.is_zero() => Outcome::Fail {
+					why: format!("{}: Permit2 may not move the float wallet's USDC", chain.name),
+					fix: format!("from {wallet:#x}, approve Permit2 (0x000000000022D473030F116dDEE9F6B43aC78BA3) to spend USDC once"),
+				},
+				Ok((balance, _)) if balance <= alloy::primitives::U256::from(floor) => Outcome::Warn(format!(
+					"{}: {balance} base units, at or below the floor {floor}; every purchase will be refused until it is topped up",
+					chain.name
+				)),
+				Ok((balance, allowance)) => Outcome::Pass(format!(
+					"{}: {balance} base units (floor {floor}), Permit2 allowance {allowance}",
+					chain.name
+				)),
+				Err(e) => Outcome::Fail { why: e.to_string(), fix: "check this chain's rpcs (see the RPC check)".into() },
+			},
+			_ => Outcome::Skip(format!("{}: its RPCs or USDC address are not usable (see above)", chain.name)),
+		};
+		r.add(PURCHASE_FLOAT, outcome);
 	}
 }
 

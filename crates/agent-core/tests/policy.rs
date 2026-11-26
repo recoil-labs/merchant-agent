@@ -241,6 +241,7 @@ async fn pricing_waits_while_the_quote_book_cannot_be_read() {
 #[test]
 fn invariant_3_the_rate_band_boundary() {
 	let terms = |rate: &str| QuoteTerms {
+		direction: merchant_agent_core::aggregator::types::Direction::Offramp,
 		quote_id: "q".into(),
 		chain: "eip155:84532".into(),
 		asset: "USDC".into(),
@@ -263,6 +264,7 @@ fn invariant_3_the_rate_band_boundary() {
 		"below the band too"
 	);
 	let no_reference = QuoteTerms {
+		direction: merchant_agent_core::aggregator::types::Direction::Offramp,
 		reference_rate: None,
 		..terms("9999")
 	};

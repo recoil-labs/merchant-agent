@@ -179,6 +179,35 @@ CREATE TABLE audit (
 	hash     TEXT NOT NULL
 );
 "#,
+	r#"
+-- Merchant-signed purchases (v0.3). Quotes now record their direction: a
+-- purchase is priced only on an on-ramp quote and a cash-out only on an
+-- off-ramp one. Every quote recorded before this was a cash-out quote.
+ALTER TABLE quotes_seen ADD COLUMN direction TEXT NOT NULL DEFAULT 'offramp';
+
+-- Each purchase lock the agent was asked to sign, and what it did. A trade
+-- is signed at most once: its signature is kept before it is posted and
+-- re-posted after a crash. `day` is the Lagos day it was signed, for the
+-- daily limit.
+CREATE TABLE purchases (
+	trade_id   TEXT PRIMARY KEY,
+	chain      TEXT NOT NULL,
+	quote_id   TEXT NOT NULL,
+	buyer      TEXT NOT NULL,
+	fiat_gross TEXT NOT NULL,
+	asset      TEXT NOT NULL,
+	status     TEXT NOT NULL CHECK (status IN ('signed', 'posted', 'refused')),
+	signature  TEXT,
+	reason     TEXT,
+	day        TEXT NOT NULL,
+	seen_at    TEXT NOT NULL,
+	signed_at  TEXT,
+	posted_at  TEXT,
+	outcome    TEXT,
+	CHECK (status = 'refused' OR signature IS NOT NULL)
+);
+CREATE INDEX purchases_day ON purchases(day, status);
+"#,
 ];
 
 /// The schema version this build writes.
@@ -1323,8 +1352,8 @@ impl Store {
 		for q in quotes {
 			let n = tx.execute(
 				"INSERT OR IGNORE INTO quotes_seen (quote_id, chain, asset, asset_decimals, fiat_currency, rail, rate,
-				   fee_fixed, fee_bps, min_fiat, max_fiat, reference_rate, first_seen)
-				 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+				   fee_fixed, fee_bps, min_fiat, max_fiat, reference_rate, first_seen, direction)
+				 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
 				params![
 					q.id,
 					q.chain,
@@ -1339,6 +1368,7 @@ impl Store {
 					q.max_fiat.to_string(),
 					reference_rate(q),
 					ts(now),
+					direction_str(q.direction),
 				],
 			)?;
 			if n == 1 {
@@ -1348,7 +1378,8 @@ impl Store {
 					"quote_recorded",
 					None,
 					&format!(
-						"{} on {} {}: rate {}, fee {} + {} bps, {}..{} kobo, reference {}",
+						"{} {} on {} {}: rate {}, fee {} + {} bps, {}..{} kobo, reference {}",
+						direction_str(q.direction),
 						q.id,
 						q.chain,
 						q.rail,
@@ -1385,12 +1416,13 @@ impl Store {
 			String,
 			String,
 			Option<String>,
+			String,
 		);
 		let row: Option<Row> = self
 			.conn()
 			.query_row(
 				"SELECT quote_id, chain, asset, asset_decimals, fiat_currency, rail, rate, fee_fixed, fee_bps,
-				   min_fiat, max_fiat, reference_rate FROM quotes_seen WHERE quote_id = ?1",
+				   min_fiat, max_fiat, reference_rate, direction FROM quotes_seen WHERE quote_id = ?1",
 				[quote_id],
 				|r| {
 					Ok((
@@ -1406,14 +1438,34 @@ impl Store {
 						r.get(9)?,
 						r.get(10)?,
 						r.get(11)?,
+						r.get(12)?,
 					))
 				},
 			)
 			.optional()?;
 		row.map(
-			|(id, chain, asset, dec, cur, rail, rate, fixed, bps, min, max, reference)| {
+			|(
+				id,
+				chain,
+				asset,
+				dec,
+				cur,
+				rail,
+				rate,
+				fixed,
+				bps,
+				min,
+				max,
+				reference,
+				direction,
+			)| {
 				Ok(crate::policy::pricing::QuoteTerms {
 					quote_id: id,
+					direction: match direction.as_str() {
+						"offramp" => crate::aggregator::types::Direction::Offramp,
+						"onramp" => crate::aggregator::types::Direction::Onramp,
+						_ => return Err(StoreError::Corrupt("quote direction".into())),
+					},
 					chain,
 					asset,
 					asset_decimals: u8::try_from(dec)
@@ -1431,6 +1483,196 @@ impl Store {
 			},
 		)
 		.transpose()
+	}
+
+	// ── merchant-signed purchases ────────────────────────────────────────
+
+	/// What the agent did with a purchase lock, if it has seen it.
+	pub fn purchase(&self, trade_id: &str) -> StoreResult<Option<PurchaseRecord>> {
+		let conn = self.conn();
+		let mut stmt = conn.prepare(&format!("{SELECT_PURCHASE} WHERE trade_id = ?1"))?;
+		let mut rows = stmt.query_map([trade_id], raw_purchase)?;
+		rows.next()
+			.transpose()?
+			.map(PurchaseRecord::from_raw)
+			.transpose()
+	}
+
+	/// Signed purchases not yet accepted by RecoilPay, oldest first: posted
+	/// again after a crash or a failed post.
+	pub fn unposted_purchases(&self) -> StoreResult<Vec<PurchaseRecord>> {
+		let conn = self.conn();
+		let mut stmt = conn.prepare(&format!(
+			"{SELECT_PURCHASE} WHERE status = 'signed' ORDER BY signed_at, trade_id"
+		))?;
+		let rows = stmt.query_map([], raw_purchase)?;
+		rows.map(|r| PurchaseRecord::from_raw(r?)).collect()
+	}
+
+	/// The naira of every purchase signed on Lagos day `day`, for the daily
+	/// limit.
+	pub fn signed_purchase_total(&self, day: &str) -> StoreResult<Minor> {
+		let conn = self.conn();
+		let mut stmt = conn.prepare(
+			"SELECT fiat_gross FROM purchases WHERE day = ?1 AND status IN ('signed', 'posted')",
+		)?;
+		let rows = stmt.query_map([day], |r| r.get::<_, String>(0))?;
+		let mut total: u128 = 0;
+		for r in rows {
+			total = total
+				.checked_add(parse_minor(&r?)?.get())
+				.ok_or_else(|| StoreError::Corrupt("purchase total overflows".into()))?;
+		}
+		Ok(Minor(total))
+	}
+
+	/// Record a purchase signature before it is posted, with its audit
+	/// entry. Refused if the trade was already signed or refused: a trade
+	/// is signed at most once.
+	pub fn record_purchase_signed(
+		&self,
+		p: &NewPurchase<'_>,
+		signature: &str,
+		now: DateTime<Utc>,
+	) -> StoreResult<()> {
+		let mut conn = self.conn();
+		let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+		self.check_lease(&tx, now)?;
+		tx.execute(
+			"INSERT INTO purchases (trade_id, chain, quote_id, buyer, fiat_gross, asset, status, signature, day, seen_at, signed_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'signed', ?7, ?8, ?9, ?9)",
+			params![
+				p.trade_id,
+				p.chain,
+				p.quote_id,
+				p.buyer,
+				p.fiat_gross.to_string(),
+				p.asset.to_string(),
+				signature,
+				crate::policy::limits::day_of(now),
+				ts(now)
+			],
+		)?;
+		audit::append(
+			&tx,
+			"agent",
+			"purchase_signed",
+			Some(p.trade_id),
+			&format!(
+				"{} base units for {} kobo, quote {} on {}, buyer {}",
+				p.asset, p.fiat_gross, p.quote_id, p.chain, p.buyer
+			),
+			now,
+		)?;
+		tx.commit()?;
+		drop(conn);
+		self.mirror();
+		Ok(())
+	}
+
+	/// Record a refusal and why, with its audit entry. A trade already
+	/// signed or refused is left as it is: `Ok(false)`.
+	pub fn record_purchase_refused(
+		&self,
+		p: &NewPurchase<'_>,
+		reason: &str,
+		now: DateTime<Utc>,
+	) -> StoreResult<bool> {
+		let mut conn = self.conn();
+		let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+		self.check_lease(&tx, now)?;
+		let n = tx.execute(
+			"INSERT OR IGNORE INTO purchases (trade_id, chain, quote_id, buyer, fiat_gross, asset, status, reason, day, seen_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'refused', ?7, ?8, ?9)",
+			params![
+				p.trade_id,
+				p.chain,
+				p.quote_id,
+				p.buyer,
+				p.fiat_gross.to_string(),
+				p.asset.to_string(),
+				reason,
+				crate::policy::limits::day_of(now),
+				ts(now)
+			],
+		)?;
+		if n == 1 {
+			audit::append(
+				&tx,
+				"agent",
+				"purchase_refused",
+				Some(p.trade_id),
+				reason,
+				now,
+			)?;
+		}
+		tx.commit()?;
+		drop(conn);
+		self.mirror();
+		Ok(n == 1)
+	}
+
+	/// RecoilPay accepted the signature; `outcome` is what it said.
+	pub fn record_purchase_posted(
+		&self,
+		trade_id: &str,
+		outcome: &str,
+		now: DateTime<Utc>,
+	) -> StoreResult<()> {
+		let mut conn = self.conn();
+		let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+		self.check_lease(&tx, now)?;
+		let n = tx.execute(
+			"UPDATE purchases SET status = 'posted', posted_at = ?2, outcome = ?3 WHERE trade_id = ?1 AND status = 'signed'",
+			params![trade_id, ts(now), outcome],
+		)?;
+		if n == 1 {
+			audit::append(
+				&tx,
+				"agent",
+				"purchase_posted",
+				Some(trade_id),
+				outcome,
+				now,
+			)?;
+		}
+		tx.commit()?;
+		drop(conn);
+		self.mirror();
+		Ok(())
+	}
+
+	/// For the console: purchases signed and refused, and the median
+	/// seconds from first seeing a lock to signing it.
+	pub fn purchase_stats(&self) -> StoreResult<PurchaseStats> {
+		let conn = self.conn();
+		let mut stmt = conn.prepare("SELECT status, seen_at, signed_at FROM purchases")?;
+		let rows = stmt.query_map([], |r| {
+			Ok((
+				r.get::<_, String>(0)?,
+				r.get::<_, String>(1)?,
+				r.get::<_, Option<String>>(2)?,
+			))
+		})?;
+		let mut stats = PurchaseStats::default();
+		let mut secs = Vec::new();
+		for r in rows {
+			let (status, seen, signed) = r?;
+			match status.as_str() {
+				"refused" => stats.refused += 1,
+				_ => stats.signed += 1,
+			}
+			if let Some(signed) = signed {
+				secs.push(
+					(parse_ts(&signed)? - parse_ts(&seen)?)
+						.num_milliseconds()
+						.max(0),
+				);
+			}
+		}
+		secs.sort_unstable();
+		stats.median_sign_millis = (!secs.is_empty()).then(|| secs[secs.len() / 2]);
+		Ok(stats)
 	}
 
 	// ── two-person approvals ─────────────────────────────────────────────
@@ -1817,6 +2059,105 @@ fn migrate(conn: &mut Connection, path: &Path) -> StoreResult<()> {
 		tx.commit()?;
 	}
 	Ok(())
+}
+
+fn direction_str(d: crate::aggregator::types::Direction) -> &'static str {
+	match d {
+		crate::aggregator::types::Direction::Offramp => "offramp",
+		crate::aggregator::types::Direction::Onramp => "onramp",
+	}
+}
+
+/// A purchase lock the agent is about to sign or refuse.
+#[derive(Debug, Clone)]
+pub struct NewPurchase<'a> {
+	pub trade_id: &'a str,
+	pub chain: &'a str,
+	pub quote_id: &'a str,
+	pub buyer: &'a str,
+	pub fiat_gross: Minor,
+	pub asset: Minor,
+}
+
+/// What the agent did with a purchase lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PurchaseStatus {
+	/// Signed; not yet accepted by RecoilPay.
+	Signed,
+	Posted,
+	Refused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurchaseRecord {
+	pub trade_id: String,
+	pub chain: String,
+	pub fiat_gross: Minor,
+	pub asset: Minor,
+	pub status: PurchaseStatus,
+	pub signature: Option<String>,
+	pub reason: Option<String>,
+	pub signed_at: Option<DateTime<Utc>>,
+	pub outcome: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PurchaseStats {
+	pub signed: u64,
+	pub refused: u64,
+	pub median_sign_millis: Option<i64>,
+}
+
+const SELECT_PURCHASE: &str =
+	"SELECT trade_id, chain, fiat_gross, asset, status, signature, reason, signed_at, outcome FROM purchases";
+
+type RawPurchase = (
+	String,
+	String,
+	String,
+	String,
+	String,
+	Option<String>,
+	Option<String>,
+	Option<String>,
+	Option<String>,
+);
+
+fn raw_purchase(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawPurchase> {
+	Ok((
+		r.get(0)?,
+		r.get(1)?,
+		r.get(2)?,
+		r.get(3)?,
+		r.get(4)?,
+		r.get(5)?,
+		r.get(6)?,
+		r.get(7)?,
+		r.get(8)?,
+	))
+}
+
+impl PurchaseRecord {
+	fn from_raw(
+		(trade_id, chain, gross, asset, status, signature, reason, signed_at, outcome): RawPurchase,
+	) -> StoreResult<Self> {
+		Ok(Self {
+			trade_id,
+			chain,
+			fiat_gross: parse_minor(&gross)?,
+			asset: parse_minor(&asset)?,
+			status: match status.as_str() {
+				"signed" => PurchaseStatus::Signed,
+				"posted" => PurchaseStatus::Posted,
+				"refused" => PurchaseStatus::Refused,
+				_ => return Err(StoreError::Corrupt("purchase status".into())),
+			},
+			signature,
+			reason,
+			signed_at: signed_at.as_deref().map(parse_ts).transpose()?,
+			outcome,
+		})
+	}
 }
 
 const SELECT_TRADE: &str = "SELECT trade_id, chain, quote_id, asset_minor, fiat_minor, fee_minor, rate, user_address,
