@@ -358,6 +358,9 @@ pub struct EngineConfig {
 	/// A quote on any other chain, or claiming other decimals, is never
 	/// recorded: its terms could not have come from this merchant.
 	pub chain_usdc_decimals: BTreeMap<String, u8>,
+	/// Record the merchant's purchase (on-ramp) quotes too, for pricing
+	/// merchant-signed purchases (v0.3).
+	pub purchases_enabled: bool,
 }
 
 impl EngineConfig {
@@ -376,6 +379,7 @@ impl EngineConfig {
 			two_person: policy.two_person.clone(),
 			reference_rates: BTreeMap::new(),
 			chain_usdc_decimals: BTreeMap::new(),
+			purchases_enabled: false,
 		}
 	}
 
@@ -395,6 +399,7 @@ impl EngineConfig {
 			.iter()
 			.map(|c| (c.caip2.clone(), c.usdc_decimals))
 			.collect();
+		cfg.purchases_enabled = config.purchases.enabled;
 		cfg
 	}
 
@@ -425,6 +430,9 @@ pub struct Alert {
 	/// The bank's or the agent's own words about what happened. No
 	/// personal data.
 	pub detail: Option<String>,
+	/// Set for a merchant-signed purchase the agent refused to sign (v0.3):
+	/// why. `amount` is then the buyer's naira.
+	pub purchase_refusal: Option<String>,
 }
 
 /// How often the agent tells RecoilPay it is alive.
@@ -557,15 +565,21 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 	/// Why a quote from the aggregator's book can't be one this merchant
 	/// published, or `None` if it can. The quote book drives pricing, so its
 	/// terms must match what the agent pins locally: this operator's
-	/// cash-out, USDC on a configured chain with that chain's decimals, and
+	/// cash-out (or purchase, when purchases are enabled), USDC on a configured chain with that chain's decimals, and
 	/// (when the merchant set any reference rates) a rail with a reference,
 	/// so the rate band always applies.
 	fn quote_refusal(&self, q: &Quote) -> Option<&'static str> {
 		if !crate::aggregator::valid_id(&q.id) {
 			return Some("the quote id is not a plain identifier");
 		}
-		if q.solver_id != self.cfg.solver_id || q.direction != Direction::Offramp {
-			return Some("not this operator's cash-out quote");
+		if q.solver_id != self.cfg.solver_id {
+			return Some("not this operator's quote");
+		}
+		// Purchase quotes are recorded only when this agent signs purchases:
+		// their terms price nothing else (a cash-out is priced on off-ramp
+		// terms only).
+		if q.direction == Direction::Onramp && !self.cfg.purchases_enabled {
+			return Some("a purchase quote, and purchases are not enabled");
 		}
 		if q.asset != "USDC" {
 			return Some("not a USDC quote");
@@ -1158,6 +1172,7 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 							account_masked: next.account_masked.clone(),
 							amount: next.fiat_minor,
 							detail: detail.clone(),
+							purchase_refusal: None,
 						})
 				}
 				Effect::PauseOffers => self.pause("agent", true).await?,
@@ -1430,6 +1445,7 @@ impl<Pl: Platform, Lo: Locks, Ch: Checks, Ra: PayoutRail, Cl: Clock> Engine<Pl, 
 				.then(|| DateTime::from_timestamp(last, 0))
 				.flatten(),
 			lease_holder: self.store.lease()?.map(|(holder, _, _)| holder),
+			purchases: Some(self.store.purchase_stats()?).filter(|p| p.signed + p.refused > 0),
 		})
 	}
 }

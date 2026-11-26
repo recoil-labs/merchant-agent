@@ -264,11 +264,14 @@ fn an_older_database_is_backed_up_before_it_is_migrated() {
 	use merchant_agent_core::store::{DB_FILE, SCHEMA_VERSION};
 	let dir = tempfile::tempdir().unwrap();
 	drop(Store::open(dir.path(), "first").unwrap());
-	// Make it a schema-3 database: the last migration (the audit table) undone.
+	// Make it a schema-3 database: migrations 4 (the audit table) and 5
+	// (purchases, quote direction) undone.
 	{
 		let c = rusqlite::Connection::open(dir.path().join(DB_FILE)).unwrap();
-		c.execute_batch("DROP TABLE audit; PRAGMA user_version = 3;")
-			.unwrap();
+		c.execute_batch(
+			"DROP TABLE audit; DROP TABLE purchases; ALTER TABLE quotes_seen DROP COLUMN direction; PRAGMA user_version = 3;",
+		)
+		.unwrap();
 	}
 	drop(Store::open(dir.path(), "second").unwrap());
 

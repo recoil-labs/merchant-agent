@@ -362,3 +362,68 @@ mod tests {
 		}
 	}
 }
+
+// ── merchant-signed purchases (v0.3) ────────────────────────────────────
+
+/// A purchase waiting for this merchant's signature
+/// (`GET /solver-api/operators/{id}/purchase-locks`). Nothing here is
+/// trusted for money: the agent rebuilds the lock from its own quote terms
+/// and pinned config, and signs only what it rebuilt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PurchaseLock {
+	pub trade_id: String,
+	pub quote_id: String,
+	pub chain: String,
+	/// The buyer's wallet: the lock's counterparty.
+	pub buyer: String,
+	pub fiat_currency: String,
+	/// What the buyer pays, fees included, in kobo.
+	#[serde(deserialize_with = "minor_str")]
+	pub fiat_gross: Minor,
+	/// The whole lock, in the token's base units.
+	#[serde(deserialize_with = "minor_str")]
+	pub asset_amount: Minor,
+	pub token: String,
+	pub escrow: String,
+	/// The end of the signature window, and the Permit2 deadline.
+	pub sign_by: DateTime<Utc>,
+	/// The Permit2 typed data RecoilPay shows. Compared with the agent's
+	/// own, never signed as given.
+	pub typed_data: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PurchaseLocksResponse {
+	pub locks: Vec<PurchaseLock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PurchaseFundingMode {
+	Hosted,
+	MerchantSigned,
+}
+
+/// One chain's purchase funding as RecoilPay has it registered
+/// (`GET /solver-api/operators/{id}/purchase-funding`), for `doctor`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PurchaseFunding {
+	pub chain: String,
+	pub mode: PurchaseFundingMode,
+	pub float_wallet: Option<String>,
+	pub token: Option<String>,
+	pub balance: Option<String>,
+	pub permit2_allowance: Option<String>,
+	pub paused: bool,
+	pub median_sign_secs: Option<i64>,
+	pub recent_timeouts: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PurchaseFundingList {
+	pub chains: Vec<PurchaseFunding>,
+}

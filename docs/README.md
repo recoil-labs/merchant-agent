@@ -141,6 +141,12 @@ Console roles: a **viewer** sees; an **operator** can also pause, mark a
 trade paid, and pay manual payouts; an **approver** can also approve held
 payouts and resume after an automatic pause; an **admin** also manages users.
 
+## Merchant-signed purchases
+
+Optional, from v0.3: the agent locks each purchase's USDC from your own float
+wallet, so RecoilPay never holds your sale USDC. See
+[Merchant-signed purchases](purchases.md).
+
 ## Runbooks
 
 One page per situation, each with what you'll see, what the agent already
@@ -159,8 +165,10 @@ did, what to do, and how to know it's fixed:
 
 ## Known limits of v1
 
-- **Cash-outs only.** The agent pays naira for USDC. It doesn't handle
-  purchases (naira in, crypto out).
+- **Purchases are signed, not paid.** For purchases (naira in, crypto out)
+  the agent only signs each lock from your float wallet, when you turn on
+  [merchant-signed purchases](purchases.md); it never confirms the naira
+  arrived. You confirm that, as today.
 - **EVM chains only.** No Solana.
 - **One instance.** No high availability: one agent per operator, on one
   volume. If its machine dies, start it on another with the same volume.

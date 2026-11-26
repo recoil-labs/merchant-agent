@@ -39,13 +39,25 @@ impl Screening for NoScreening {
 
 pub struct DenyList {
 	tags: HashSet<String>,
+	/// Buyer wallets (lower-cased `0x` addresses): purchases from them are
+	/// refused (v0.3).
+	wallets: HashSet<String>,
 }
 
 /// Shows the size only: the tags are a list of payees.
 impl std::fmt::Debug for DenyList {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "DenyList({} tags)", self.tags.len())
+		write!(
+			f,
+			"DenyList({} tags, {} wallets)",
+			self.tags.len(),
+			self.wallets.len()
+		)
 	}
+}
+
+fn is_wallet(s: &str) -> bool {
+	s.len() == 42 && s.starts_with("0x") && s[2..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn is_tag(s: &str) -> bool {
@@ -53,25 +65,35 @@ fn is_tag(s: &str) -> bool {
 }
 
 impl DenyList {
-	/// One tag per line; blank lines and `#` comments are ignored. A line
-	/// that is not a tag is an error naming its line number (never its
-	/// content: it might be a raw account number pasted by mistake).
+	/// One payee tag or buyer wallet (`0x` address) per line; blank lines
+	/// and `#` comments are ignored. A line that is neither is an error
+	/// naming its line number (never its content: it might be a raw account
+	/// number pasted by mistake).
 	pub fn parse(text: &str) -> Result<Self, String> {
 		let mut tags = HashSet::new();
+		let mut wallets = HashSet::new();
 		for (i, line) in text.lines().enumerate() {
 			let line = line.split('#').next().unwrap_or("").trim();
 			if line.is_empty() {
 				continue;
 			}
-			if !is_tag(line) {
+			if is_tag(line) {
+				tags.insert(line.to_ascii_lowercase());
+			} else if is_wallet(line) {
+				wallets.insert(line.to_ascii_lowercase());
+			} else {
 				return Err(format!(
-					"line {}: not a payee tag. Make the list with `merchant-agent screening hash`",
+					"line {}: not a payee tag or a 0x wallet. Make payee tags with `merchant-agent screening hash`",
 					i + 1
 				));
 			}
-			tags.insert(line.to_ascii_lowercase());
 		}
-		Ok(Self { tags })
+		Ok(Self { tags, wallets })
+	}
+
+	/// Whether purchases from `wallet` are refused.
+	pub fn denies_wallet(&self, wallet: &str) -> bool {
+		self.wallets.contains(&wallet.trim().to_ascii_lowercase())
 	}
 
 	pub fn load(path: &Path) -> Result<Self, String> {
@@ -81,11 +103,11 @@ impl DenyList {
 	}
 
 	pub fn len(&self) -> usize {
-		self.tags.len()
+		self.tags.len() + self.wallets.len()
 	}
 
 	pub fn is_empty(&self) -> bool {
-		self.tags.is_empty()
+		self.tags.is_empty() && self.wallets.is_empty()
 	}
 }
 

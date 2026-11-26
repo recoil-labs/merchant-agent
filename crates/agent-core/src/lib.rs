@@ -25,6 +25,7 @@ pub mod notify;
 pub mod payee;
 pub mod pii;
 pub mod policy;
+pub mod purchases;
 pub mod rail;
 pub mod runner;
 pub mod secrets;

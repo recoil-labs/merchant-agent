@@ -332,3 +332,67 @@ fn a_template_rail_needs_a_url_and_a_token_and_https_in_production() {
 	set(&mut p, "rail.url", "https://payouts.internal".into());
 	assert!(rejected(&p).contains("rail.url is only for rail.kind template"));
 }
+
+// ── merchant-signed purchases (v0.3) ────────────────────────────────────
+
+/// A production config with purchases on and every purchase limit set.
+fn with_purchases() -> Value {
+	let mut v = production();
+	let chain = doc(&sandbox_yaml())["chains"][0]["caip2"]
+		.as_str()
+		.unwrap()
+		.to_string();
+	set(
+		&mut v,
+		"purchases",
+		doc(&format!(
+			"enabled: true\nsigner: file:///etc/merchant-agent/float-key\nmax_per_trade_minor: \"50000000\"\nmax_per_day_minor: \"200000000\"\nfloat_floor:\n  \"{chain}\": \"10000000\"\n"
+		)),
+	);
+	v
+}
+
+#[test]
+fn purchases_are_off_unless_enabled() {
+	let c = parse(&production()).unwrap();
+	assert!(!c.purchases.enabled);
+	assert_eq!(
+		(c.purchases.poll_secs, c.purchases.max_deadline_secs),
+		(2, 300)
+	);
+	let c = parse(&with_purchases()).unwrap();
+	assert!(c.purchases.enabled);
+	assert!(c
+		.secret_refs()
+		.iter()
+		.any(|(what, _)| *what == "purchase float wallet key"));
+}
+
+#[test]
+fn purchases_need_their_own_signer_and_every_limit() {
+	let mut v = with_purchases();
+	remove(&mut v, "purchases.signer");
+	assert!(rejected(&v).contains("purchases.signer must reference"));
+
+	let mut v = with_purchases();
+	let payee = v["payee"]["private_key"].clone();
+	set(&mut v, "purchases.signer", payee);
+	assert!(rejected(&v).contains("never the payee key"));
+
+	let mut v = with_purchases();
+	remove(&mut v, "purchases.max_per_day_minor");
+	assert!(rejected(&v).contains("no defaults for money"));
+
+	let mut v = with_purchases();
+	set(&mut v, "purchases.max_per_trade_minor", "300000000".into());
+	assert!(rejected(&v).contains("cannot be more than purchases.max_per_day_minor"));
+
+	let mut v = with_purchases();
+	remove(&mut v, "purchases.float_floor");
+	assert!(rejected(&v).contains("purchases.float_floor needs an entry"));
+
+	let mut v = with_purchases();
+	set(&mut v, "purchases.signer", "env://FLOAT_KEY".into());
+	assert!(rejected(&v)
+		.contains("purchases.signer is env://FLOAT_KEY; env:// secrets are refused in production"));
+}

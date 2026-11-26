@@ -25,6 +25,7 @@ fn alert(urgent: bool, state: AgentState) -> Alert {
 		account_masked: Some("******0000".into()),
 		amount: Minor(15_081_152),
 		detail: Some("insufficient funds in the payout account".into()),
+		purchase_refusal: None,
 	}
 }
 

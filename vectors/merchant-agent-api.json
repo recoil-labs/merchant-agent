@@ -1,5 +1,5 @@
 {
-  "_about": "Response shapes of the aggregator routes the Merchant Agent calls, with every optional field present. The agent's fake aggregator (repo recoil-labs/merchant-agent, crates/agent-core/tests/aggregator.rs) serves these, and recoil-core/aggregator/crates/api/tests/merchant_agent_contract.rs checks that the real types serialise to exactly these keys (chains: at least the keys the agent reads). Change a response type and that test fails until this file and the agent are updated together. payee_sealed and payee_commitment are the 'NIP payee' case from fiat-payee.json; amounts are the agent design note §2's worked example. Every value is a test value.",
+  "_about": "Response shapes of the aggregator routes the Merchant Agent calls, with every optional field present. The agent's fake aggregator (repo recoil-labs/merchant-agent, crates/agent-core/tests/aggregator.rs) serves these, and recoil-core/aggregator/crates/api/tests/merchant_agent_contract.rs checks that the real types serialise to exactly these keys (chains: at least the keys the agent reads). Change a response type and that test fails until this file and the agent are updated together. payee_sealed and payee_commitment are the 'NIP payee' case from fiat-payee.json; amounts are the agent design note §2's worked example. Every value is a test value. purchaseLocks (GET /solver-api/operators/{id}/purchase-locks) and purchaseFunding (GET .../purchase-funding) are for merchant-signed purchases (Merchant Agent v0.3); purchaseLocks' nonce is lock_nonce(tradeId), its deadline is signBy, and POST .../fiat-trades/{trade}/purchase-lock answers with a plain trade (the fiatTradeView trade shape).",
   "ownFiatTrade": {
     "id": "ft-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
     "quote_id": "fq-3f2b8c1e-5a6d-4e7f-8a9b-0c1d2e3f4a5b",
@@ -145,6 +145,102 @@
             "decimals": 6
           }
         ]
+      }
+    ]
+  },
+  "purchaseLocks": {
+    "locks": [
+      {
+        "tradeId": "ft-on-7c1e9a2b4d6f48e0a1b2c3d4e5f60718",
+        "quoteId": "fq-1",
+        "chain": "eip155:84532",
+        "buyer": "0x2222222222222222222222222222222222222222",
+        "fiatCurrency": "NGN",
+        "fiatGross": "15081152",
+        "assetAmount": "100000000",
+        "token": "0x73c83dacc74bb8a704717ac09703b959e74b9705",
+        "escrow": "0x112a534104ac10e73d57f7c5a4c6469632392173",
+        "signBy": "2026-11-13T12:03:00Z",
+        "typedData": {
+          "domain": {
+            "name": "Permit2",
+            "chainId": 84532,
+            "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+          },
+          "types": {
+            "PermitWitnessTransferFrom": [
+              {
+                "name": "permitted",
+                "type": "TokenPermissions"
+              },
+              {
+                "name": "spender",
+                "type": "address"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "witness",
+                "type": "EscrowLock"
+              }
+            ],
+            "EscrowLock": [
+              {
+                "name": "tradeId",
+                "type": "bytes32"
+              },
+              {
+                "name": "counterparty",
+                "type": "address"
+              }
+            ],
+            "TokenPermissions": [
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "amount",
+                "type": "uint256"
+              }
+            ]
+          },
+          "primaryType": "PermitWitnessTransferFrom",
+          "message": {
+            "permitted": {
+              "token": "0x73c83dacc74bb8a704717ac09703b959e74b9705",
+              "amount": "100000000"
+            },
+            "spender": "0x112a534104ac10e73d57f7c5a4c6469632392173",
+            "nonce": "19760784570805263875262786391200291693405868899304954254016520313359638641323",
+            "deadline": "1794571380",
+            "witness": {
+              "tradeId": "0x78d56ff285eeb70a6e4d166d63334bb763be47cc3a3b722789c58988c2e77eae",
+              "counterparty": "0x2222222222222222222222222222222222222222"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "purchaseFunding": {
+    "chains": [
+      {
+        "chain": "eip155:84532",
+        "mode": "merchant_signed",
+        "floatWallet": "0x1111111111111111111111111111111111111111",
+        "token": "0x73c83dacc74bb8a704717ac09703b959e74b9705",
+        "balance": "250000000",
+        "permit2Allowance": "1000000000",
+        "paused": false,
+        "medianSignSecs": 3,
+        "recentTimeouts": 0
       }
     ]
   }

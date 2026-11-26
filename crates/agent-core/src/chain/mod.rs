@@ -40,6 +40,8 @@ use crate::config;
 
 sol! {
 	function locks(bytes32 lockId) external view;
+	function balanceOf(address owner) external view returns (uint256);
+	function allowance(address owner, address spender) external view returns (uint256);
 }
 
 /// What the lock for a trade must look like.
@@ -436,6 +438,52 @@ impl ChainReader {
 				.collect::<Vec<_>>()
 				.join("; "),
 		))
+	}
+
+	/// A float wallet's balance of `token` and how much of it `spender`
+	/// (Permit2) may move, at the latest block, from the first endpoint that
+	/// answers on the pinned chain. For merchant-signed purchases (v0.3).
+	pub async fn float(
+		&self,
+		token: Address,
+		owner: Address,
+		spender: Address,
+	) -> Result<(U256, U256), ChainError> {
+		let mut last = ChainError::Config("no RPC endpoints".into());
+		for ep in &self.endpoints {
+			match self.float_at(ep, token, owner, spender).await {
+				Ok(v) => return Ok(v),
+				Err(e) => last = e,
+			}
+		}
+		Err(last)
+	}
+
+	async fn float_at(
+		&self,
+		ep: &Endpoint,
+		token: Address,
+		owner: Address,
+		spender: Address,
+	) -> Result<(U256, U256), ChainError> {
+		self.require_chain(ep).await?;
+		let read = |input: Vec<u8>| async move {
+			let call = TransactionRequest {
+				to: Some(TxKind::Call(token)),
+				input: TransactionInput::new(Bytes::from(input)),
+				..Default::default()
+			};
+			let out = ep.provider.call(call).await.map_err(|e| ep.err(e))?;
+			if out.len() != 32 {
+				return Err(ChainError::Malformed(
+					"the token's answer is not one uint256".into(),
+				));
+			}
+			Ok(U256::from_be_slice(&out))
+		};
+		let balance = read(balanceOfCall { owner }.abi_encode()).await?;
+		let allowance = read(allowanceCall { owner, spender }.abi_encode()).await?;
+		Ok((balance, allowance))
 	}
 
 	async fn require_chain(&self, ep: &Endpoint) -> Result<(), ChainError> {
