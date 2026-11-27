@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.0
+
+**Merchant-signed purchases, off unless you turn them on.** With purchases
+off (the default) this version pays cash-outs exactly as 0.2.0 does, against
+any RecoilPay. Turn them on only once RecoilPay offers merchant-signed
+purchases on your chain and you have registered a float wallet: until then
+the agent refuses to start with `purchases.enabled`. The database is
+migrated once on the first start (schema 5), after a backup beside it.
+
 - **Merchant-signed purchases** ([docs/purchases.md](docs/purchases.md)),
   off unless `purchases.enabled`. The agent signs each purchase's Permit2
   lock from your own float wallet, so RecoilPay never holds your sale USDC;
@@ -26,7 +35,13 @@
   a purchase only on purchase terms.
 - **The console** dashboard shows purchases signed and refused, and the
   median time to sign.
-
+- **Console sign-in from a browser.** Real browsers could not sign in: the
+  console's pages sent `Referrer-Policy: no-referrer`, so a browser's form
+  posts carried `Origin: null` and the same-site check refused them. Pages
+  now send `Referrer-Policy: same-origin`, and `Origin: null` is accepted
+  only with `Sec-Fetch-Site: same-origin`.
+- **Security:** `url` 2.5.9 (RUSTSEC-2026-0592, a stack overflow in
+  `Url::origin()` on nested `blob:` URLs).
 - **Licence.** The agent now ships under the RecoilPay Merchant Agent License
   ([`LICENSE`](LICENSE)), which replaces the bare "All rights reserved"
   notice. It is source-available, not open source: you may read, audit and
